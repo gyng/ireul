@@ -18,9 +18,9 @@ impl Slice {
 }
 
 impl ops::Deref for Slice {
-	type Target = [u8];
+    type Target = [u8];
 
-	fn deref(&self) -> &[u8] {
-		&self.inner
-	}
+    fn deref(&self) -> &[u8] {
+        &self.inner
+    }
 }
