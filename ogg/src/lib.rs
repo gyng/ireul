@@ -27,8 +27,6 @@ pub struct OggPageBuf {
 }
 
 pub struct OggPage {
-	// Unused field that defines the memory layout of OggPage,
-	// which is used during transmute.
 	inner: Slice,
 }
 
@@ -112,7 +110,7 @@ impl OggPage {
 				}
 			}
 		}
-    	
+
 		let mut cursor = Cursor::new(buf);
 
 		if buf.len() < 27 {
