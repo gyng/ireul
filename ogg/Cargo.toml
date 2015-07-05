@@ -1,0 +1,8 @@
+[package]
+name = "ogg"
+version = "0.1.0"
+authors = ["Stacey Ell <stacey.ell@gmail.com>"]
+
+
+[dependencies]
+byteorder = "0.3"

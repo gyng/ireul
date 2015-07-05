@@ -1,0 +1,10 @@
+[package]
+name = "mio_ogg"
+version = "0.1.0"
+authors = ["Stacey Ell <stacey.ell@gmail.com>"]
+
+[dependencies.ogg]
+path = "../ogg"
+
+[dependencies]
+mio = "0.3.5"

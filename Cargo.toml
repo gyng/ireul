@@ -1,0 +1,11 @@
+[package]
+name = "ireul"
+version = "0.0.1"
+authors = ["Stacey Ell <stacey.ell@gmail.com>"]
+
+
+[dependencies.ogg]
+path = "./ogg"
+
+[dependencies.mio_ogg]
+path = "./mio_ogg"
