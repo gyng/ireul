@@ -5,7 +5,7 @@ mod slice;
 use std::mem;
 use std::ops;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
-use std::io::{self, Cursor, BufRead};
+use std::io::{Cursor, BufRead};
 use std::marker::PhantomData;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use byteorder::Error as ByteOrderError;
@@ -20,40 +20,6 @@ pub enum OggPageCheckError {
 	BadCapture,
 	BadVersion,
 	BadCrc,
-}
-
-impl From<ByteOrderError> for OggPageCheckError {
-	fn from(e: ByteOrderError) -> OggPageCheckError {
-		match e {
-			ByteOrderError::UnexpectedEOF => OggPageCheckError::TooShort,
-			ByteOrderError::Io(_) => panic!("no I/O allowed"),
-		}
-	}
-}
-
-pub enum OggPageCheckedLoadError {
-	BadCrc,
-}
-
-pub enum OggPageLoadError {
-	TooShort,
-	BadCapture,
-	Io(io::Error),
-}
-
-impl From<io::Error> for OggPageLoadError {
-	fn from(e: io::Error) -> OggPageLoadError {
-		OggPageLoadError::Io(e)
-	}
-}
-
-impl From<ByteOrderError> for OggPageLoadError {
-	fn from(e: ByteOrderError) -> OggPageLoadError {
-		match e {
-			ByteOrderError::UnexpectedEOF => OggPageLoadError::TooShort,
-			ByteOrderError::Io(io) => OggPageLoadError::Io(io),
-		}
-	}
 }
 
 pub struct OggPageBuf {
@@ -138,6 +104,15 @@ impl OggPage {
 
 
     pub fn measure(buf: &[u8]) -> Result<(u64, u64), OggPageCheckError> {
+    	impl From<ByteOrderError> for OggPageCheckError {
+			fn from(e: ByteOrderError) -> OggPageCheckError {
+				match e {
+					ByteOrderError::UnexpectedEOF => OggPageCheckError::TooShort,
+					ByteOrderError::Io(_) => panic!("no I/O allowed"),
+				}
+			}
+		}
+    	
 		let mut cursor = Cursor::new(buf);
 
 		if buf.len() < 27 {
