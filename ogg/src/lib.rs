@@ -15,6 +15,7 @@ const OGG_PAGE_CAPTURE: &'static [u8] = b"OggS";
 const POSITION_OFFSET: usize = 6;
 const SERIAL_OFFSET: usize = 14;
 
+#[derive(Debug)]
 pub enum OggPageCheckError {
 	TooShort,
 	BadCapture,
