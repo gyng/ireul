@@ -59,14 +59,16 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
 
 	let mut pages = 0;
 	let mut offset = 0;
+	let mut samples = 0;
 	while offset < buffer.len() {
-		let (h_len, b_len) = try!(OggPage::measure(&buffer[offset..]));
-		offset += (h_len + b_len) as usize;
+		let page = try!(OggPage::new(&buffer[offset..]));
+		offset += page.as_u8_slice().len();
 		pages += 1;
+		samples = page.position();
 	}
 	try!(file.seek(SeekFrom::Start(0)));
 	
-	println!("loaded {} pages", pages);
+	println!("loaded ~~{} samples in {} pages", samples, pages);
 	Ok(())
 }
 

@@ -81,7 +81,7 @@ impl OggPage {
         unsafe { mem::transmute(s) }
     }
 
-    fn as_u8_slice(&self) -> &[u8] {
+    pub fn as_u8_slice(&self) -> &[u8] {
         unsafe { mem::transmute(self) }
     }
 
@@ -139,7 +139,7 @@ impl OggPage {
         Ok((cursor.position(), body_len))
     }
 
-    pub fn position(&mut self) -> u64 {
+    pub fn position(&self) -> u64 {
         let self_buf = self.as_u8_slice();
         let mut cur = Cursor::new(&self_buf[POSITION_OFFSET..POSITION_OFFSET+8]);
         cur.read_u64::<LittleEndian>().unwrap()
@@ -150,7 +150,7 @@ impl OggPage {
         tx.set_position(granule);
     }
 
-    pub fn serial(&mut self) -> u32 {
+    pub fn serial(&self) -> u32 {
         let self_buf = self.as_u8_slice();
         let mut cur = Cursor::new(&self_buf[SERIAL_OFFSET..SERIAL_OFFSET+4]);
         cur.read_u32::<LittleEndian>().unwrap()
