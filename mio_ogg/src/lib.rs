@@ -1,7 +1,6 @@
 extern crate ogg;
 extern crate mio;
 
-use std::convert::From;
 use mio::buf::{RingBuf, MutBuf, Buf};
 use ogg::{OggPage, OggPageBuf, OggPageCheckError};
 use ogg::Recapture as OggPageRecapture;
@@ -10,8 +9,6 @@ pub enum PushError {
     Full,
 }
 
-const MSG_MAX_LEN: usize = 1 << 14;
-
 #[derive(Debug)]
 pub enum ProtocolError {
     /// Message is too long.
@@ -19,24 +16,18 @@ pub enum ProtocolError {
 }
 
 pub enum PopError {
-    /// More data is needed to pop an IrcMsg
+    /// More data is needed to pop an OggPage
     MoreData,
 
-    /// Failed to parse an IrcMsg
+    /// Failed to parse an OggPage
     OggPageError(OggPageCheckError),
 }
 
-impl From<ParseError> for PopError {
-    fn from(e: ParseError) -> PopError {
-        PopError::Parse(e)
-    }
-}
+pub struct OggPageRingBuf(RingBuf);
 
-pub struct IrcMsgRingBuf(RingBuf);
-
-impl IrcMsgRingBuf {
-    pub fn new(capacity: usize) -> IrcMsgRingBuf {
-        IrcMsgRingBuf(RingBuf::new(capacity))
+impl OggPageRingBuf {
+    pub fn new(capacity: usize) -> OggPageRingBuf {
+        OggPageRingBuf(RingBuf::new(capacity))
     }
 
     pub fn is_full(&self) -> bool {
@@ -70,7 +61,7 @@ impl IrcMsgRingBuf {
 
         self.mark();
         while let Some(byte) = self.0.read_byte() {
-            recap.push_byte(bytes);
+            recap.push_byte(byte);
             consumed += 1;
             if recap.is_captured() {
                 is_captured = true;
@@ -88,23 +79,25 @@ impl IrcMsgRingBuf {
         assert!(consumed > 4);
 
         // Advance to the beginning of the located page.
-        self.advance(consumed - 4);
+        Buf::advance(self, consumed - 4);
+        Ok(())
     }
 
     pub fn pop_page(&mut self) -> Result<OggPageBuf, OggPageCheckError> {
         self.mark();
-        let header_buf = [0; 512];
-        let bytes_read = self.0.read_slice(&mut header_buf);
+        let mut header_buf = [0; 512];
+        // call this twice to handle non-contiguous reads?
+        let _ = self.0.read_slice(&mut header_buf);
         self.reset();
 
         let (h_len, b_len) = try!(OggPage::measure(&header_buf));
         let page_size = (h_len + b_len) as usize;
 
-        if self.remaining() < page_size {
+        if Buf::remaining(self) < page_size {
             return Err(OggPageCheckError::TooShort);
         }
 
-        let buf = vec![0; page_size];
+        let mut buf = vec![0; page_size];
 
         let mut bytes_read = 0;
         while bytes_read < page_size {
@@ -115,20 +108,20 @@ impl IrcMsgRingBuf {
     }
 
     pub fn push_page(&mut self, page: &OggPage) -> Result<usize, PushError> {
-        let buf = msg.as_u8_slice();
+        let buf = page.as_u8_slice();
         if MutBuf::remaining(&self.0) < buf.len() {
             return Err(PushError::Full);
         }
 
         let mut bytes_written = 0;
         while bytes_written < buf.len() {
-            bytes_written += self.write_slice(&mut buf[bytes_written..]);
+            bytes_written += self.write_slice(&buf[bytes_written..]);
         }
         Ok(bytes_written)
     }
 }
 
-impl Buf for IrcMsgRingBuf {
+impl Buf for OggPageRingBuf {
     fn remaining(&self) -> usize {
         Buf::remaining(&self.0)
     }
@@ -143,7 +136,7 @@ impl Buf for IrcMsgRingBuf {
 }
 
 
-impl MutBuf for IrcMsgRingBuf {
+impl MutBuf for OggPageRingBuf {
     fn remaining(&self) -> usize {
         MutBuf::remaining(&self.0)
     }
