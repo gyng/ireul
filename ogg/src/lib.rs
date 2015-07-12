@@ -7,6 +7,7 @@ use std::ops;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
 use std::io::{Cursor, BufRead};
 use std::marker::PhantomData;
+use std::borrow::Cow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use byteorder::Error as ByteOrderError;
 use slice::Slice;
@@ -65,18 +66,24 @@ impl OggPageBuf {
         buf.truncate((h_len + b_len) as usize);
         Ok(OggPageBuf { inner: buf })
     }
+
+    pub fn into_cow(self) -> Cow<'static, OggPage> {
+        Cow::Owned(self)
+    }
 }
 
 
 impl OggPage {
-    // The following (private!) function allows unchecked construction of a
-    // ogg page from a u8 slice.
+    /// The following function allows unchecked construction of a ogg page
+    /// from a u8 slice.  This is private because it does not maintain
+    /// the OggPage invariant.
     fn from_u8_slice_unchecked(s: &[u8]) -> &OggPage {
         unsafe { mem::transmute(s) }
     }
 
-    // The following (private!) function allows unchecked construction of a
-    // mutable ogg page from a mutable u8 slice.
+    /// The following (private!) function allows unchecked construction of a
+    /// mutable ogg page from a mutable u8 slice.  This is private because it
+    /// does not maintain the OggPage invariant.
     fn from_u8_slice_unchecked_mut(s: &mut [u8]) -> &mut OggPage {
         unsafe { mem::transmute(s) }
     }
@@ -85,6 +92,8 @@ impl OggPage {
         unsafe { mem::transmute(self) }
     }
 
+    /// Mutably borrow the underlying storage.  This is private because it
+    /// does not maintain the OggPage invariant.
     fn as_u8_slice_mut(&mut self) -> &mut [u8] {
         unsafe { mem::transmute(self) }
     }
@@ -171,6 +180,29 @@ impl OggPage {
             _marker: PhantomData,
         }
     }
+
+    /// Am iterator of packet slices
+    pub fn packets<'a>(&'a self) -> Packets<'a> {
+        Packets { page: &self, packet: 0 }
+    }
+
+    pub fn into_cow<'a>(&'a self) -> Cow<'a, OggPage> {
+        Cow::Borrowed(self)
+    }
+}
+
+pub struct Packets<'a> {
+    page: &'a OggPage,
+    packet: usize,
+}
+
+impl<'a> Iterator for Packets<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let packet_slice = self.page;
+        unimplemented!();
+    }
 }
 
 pub struct ChecksumGuard<'a> {
@@ -197,6 +229,7 @@ impl<'a> Drop for ChecksumGuard<'a> {
         self.page.recompute_checksum();
     }
 }
+
 
 pub struct Recapture([u8; 4]);
 

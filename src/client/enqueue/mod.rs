@@ -3,7 +3,7 @@ use std::fs::{self, File};
 use std::ffi::OsString;
 
 use ogg::{OggPage, OggPageCheckError};
-
+use ogg_clock::OggClock;
 use ::entrypoint::EntryPoint;
 use ::entrypoint::Error as EntryPointError;
 
@@ -50,6 +50,7 @@ impl ProgramArgs {
 
 
 pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
+    let clock = OggClock::new(48000);
     let app_name = args[0].clone();
     let args = try!(ProgramArgs::new(args));
 
@@ -60,11 +61,13 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     let mut pages = 0;
     let mut offset = 0;
     let mut samples = 0;
+
     while offset < buffer.len() {
         let page = try!(OggPage::new(&buffer[offset..]));
         offset += page.as_u8_slice().len();
         pages += 1;
         samples = page.position();
+        clock.wait(&page);
     }
     try!(file.seek(SeekFrom::Start(0)));
     
