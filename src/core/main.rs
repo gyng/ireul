@@ -1,4 +1,6 @@
 extern crate ogg;
+extern crate ogg_clock;
+extern crate rustc_serialize;
 
 use std::sync::mpsc;
 use std::net::TcpListener;
@@ -7,6 +9,8 @@ use std::path::Path;
 use std::io;
 
 use ogg::OggPageBuf;
+
+mod icecastwriter;
 
 fn main() {
     // Handler::new("/tmp/ireul-core").unwrap().start().unwrap();
