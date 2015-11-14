@@ -62,8 +62,8 @@ impl ToOwned for OggPage {
 
 impl OggPageBuf {
     pub fn new(mut buf: Vec<u8>) -> Result<OggPageBuf, OggPageCheckError>  {
-        let (h_len, b_len) = try!(OggPage::measure(&buf));
-        buf.truncate((h_len + b_len) as usize);
+        let slice_len = try!(OggPage::measure_whole(&buf)).len();
+        buf.truncate(slice_len);
         Ok(OggPageBuf { inner: buf })
     }
 
@@ -71,7 +71,6 @@ impl OggPageBuf {
         Cow::Owned(self)
     }
 }
-
 
 impl OggPage {
     /// The following function allows unchecked construction of a ogg page
@@ -99,19 +98,19 @@ impl OggPage {
     }
 
     pub fn new(buf: &[u8]) -> Result<&OggPage, OggPageCheckError> {
-        let (h_len, b_len) = try!(OggPage::measure(buf));
-        let page_length = (h_len + b_len) as usize;
-        Ok(OggPage::from_u8_slice_unchecked(&buf[0..page_length]))
+        let buffer = try!(OggPage::measure_whole(buf));
+        Ok(OggPage::from_u8_slice_unchecked(buffer))
     }
 
     pub fn new_mut(buf: &mut [u8]) -> Result<&mut OggPage, OggPageCheckError> {
-        let (h_len, b_len) = try!(OggPage::measure(buf));
-        let page_length = (h_len + b_len) as usize;
+        let page_length = {
+            let (hbuf, bbuf) = try!(OggPage::measure(buf));
+            hbuf.len() + bbuf.len()
+        };
         Ok(OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]))
     }
 
-
-    pub fn measure(buf: &[u8]) -> Result<(u64, u64), OggPageCheckError> {
+    fn measure(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
         impl From<ByteOrderError> for OggPageCheckError {
             fn from(e: ByteOrderError) -> OggPageCheckError {
                 match e {
@@ -145,7 +144,33 @@ impl OggPage {
             body_len += try!(cursor.read_u8()) as u64;
         }
 
-        Ok((cursor.position(), body_len))
+        let total_len = (cursor.position() + body_len) as usize;
+        if buf.len() < total_len {
+            return Err(OggPageCheckError::TooShort);
+        }
+
+        let h_end = cursor.position() as usize;
+        let b_end = h_end + body_len as usize;
+        Ok((
+            &buf[0..h_end],
+            &buf[h_end..b_end],
+        ))
+    }
+
+    fn measure_whole(buf: &[u8]) -> Result<&[u8], OggPageCheckError> {
+        let page_length = {
+            let (h_buf, b_buf) = try!(OggPage::measure(buf));
+            h_buf.len() + b_buf.len()
+        };
+        Ok(&buf[0..page_length])
+    }
+
+    fn measure_whole_mut(buf: &mut [u8]) -> Result<&mut [u8], OggPageCheckError> {
+        let page_length = {
+            let (hbuf, bbuf) = try!(OggPage::measure(buf));
+            hbuf.len() + bbuf.len()
+        };
+        Ok(&mut buf[0..page_length])
     }
 
     pub fn position(&self) -> u64 {

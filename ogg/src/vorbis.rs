@@ -76,7 +76,6 @@ impl VorbisHeader {
     }
 
     pub fn from_page(page: &OggPage) -> Result<VorbisHeader, VorbisHeaderCheckError> {
-        
         page.packets(packets)
     }
 
