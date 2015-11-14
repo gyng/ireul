@@ -6,6 +6,7 @@ dependencies = [
  "ogg_clock 0.1.0",
  "phf 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "phf_macros 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustc-serialize 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -91,6 +92,11 @@ dependencies = [
  "libc 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "rustc-serialize"
+version = "0.3.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "time"
