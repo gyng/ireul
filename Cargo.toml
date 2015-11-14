@@ -17,13 +17,6 @@ path = "./ogg"
 [dependencies.ogg_clock]
 path = "./ogg_clock"
 
-# [dependencies.mio_ogg]
-# path = "./mio_ogg"
-#
-# [dependencies.mio]
-# git = "https://github.com/carllerche/mio"
-#
-
 [dependencies]
 phf = "0.7.3"
 phf_macros = "0.7.3"

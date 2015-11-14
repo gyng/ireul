@@ -6,14 +6,14 @@ use ogg::OggPage;
 
 // TODO: Move mountpoint information into some serializable thing
 // https://gist.github.com/ePirat/adc3b8ba00d85b7e3870#specifying-mountpoint-information
-struct IceCastWriterOptions {
-    endpoint: &'static str,
-    mount: &'static str, // should start with a `/` eg. `/mymount.ogg`
-    user_pass: Option<&'static str>, // username:password
-    name: Option<&'static str>,
-    description: Option<&'static str>,
-    url: Option<&'static str>,
-    genre: Option<&'static str>,
+pub struct IceCastWriterOptions {
+    pub endpoint: &'static str,
+    pub mount: &'static str, // should start with a `/` eg. `/mymount.ogg`
+    pub user_pass: Option<&'static str>, // username:password
+    pub name: Option<&'static str>,
+    pub description: Option<&'static str>,
+    pub url: Option<&'static str>,
+    pub genre: Option<&'static str>,
 }
 
 impl Default for IceCastWriterOptions {
@@ -30,7 +30,7 @@ impl Default for IceCastWriterOptions {
     }
 }
 
-struct IceCastWriter {
+pub struct IceCastWriter {
     stream: TcpStream,
     options: IceCastWriterOptions,
 }

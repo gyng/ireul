@@ -1,8 +1,5 @@
-
 extern crate time;
 extern crate ogg;
-
-mod vorbis;
 
 use ogg::OggPage;
 use time::{Duration, SteadyTime};
@@ -24,6 +21,7 @@ impl AudioClock {
     }
 
     pub fn wait_delay(&self, now: SteadyTime, position: u64) -> Duration {
+        println!("({}, {}, {})", 1000, position, self.sample_rate);
         let milli_offset = (1000 * position / self.sample_rate) as i64;
         let current_pos = Duration::milliseconds(milli_offset);     
         let sleep_duration = self.start_time - now + current_pos;
@@ -35,10 +33,7 @@ pub struct OggClock(AudioClock);
 
 impl OggClock {
     pub fn new(sample_rate: u64) -> OggClock {
-        OggClock(AudioClock {
-            sample_rate: sample_rate,
-            start_time: SteadyTime::now(),
-        })
+        OggClock::new_with_start(sample_rate, SteadyTime::now())
     }
 
     pub fn new_with_start(sample_rate: u64, start_time: SteadyTime) -> OggClock {

@@ -24,6 +24,7 @@ pub enum OggPageCheckError {
     BadCrc,
 }
 
+#[derive(Clone)]
 pub struct OggPageBuf {
     inner: Vec<u8>,
 }
