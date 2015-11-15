@@ -109,7 +109,7 @@ impl OggTrack {
     }
 
     pub fn pages_mut(&self) -> TrackPageIterMut {
-        // TOOD(gyng): impl
+        // TODO: impl
         unimplemented!();
     }
 }
@@ -132,6 +132,7 @@ impl<'a> Iterator for TrackPageIter<'a> {
     }
 }
 
+// TODO: iterate &mut OggPage
 pub struct TrackPageIterMut<'a> {
     data: &'a mut [u8],
     offset: usize,

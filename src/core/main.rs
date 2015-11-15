@@ -57,7 +57,6 @@ fn main() {
         core.tick();
         println!("copied page");
     }
-    // Handler::new("/tmp/ireul-core").unwrap().start().unwrap();
 }
 
 struct Core {
@@ -79,9 +78,14 @@ impl Core {
     }
 
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<(), EnqueueTrackError> {
-        // TODO: validate monotonic position granule.
-
+        // TODO: validate position granule is strictly increasing
+        //       and begins with zero.
+        //
+        // TODO: ensure sample rate is equal to our ogg-clock's sample rate,
+        //       using the vorbis identification header.
+        //
         self.output.play_queue.push_back(req.track);
+
         Ok(())
     }
 
@@ -121,6 +125,14 @@ impl Core {
 
 /// Connects to IceCast and holds references to streamable content.
 struct OutputManager {
+    // TODO: this needs a helper to fix OggPage positions, so that the stream
+    //       starts with position of zero and strictly increases with time,
+    //       by the number of samples played.
+    //
+    // TODO: this needs a helper to fix OggPage sequences, so that the stream
+    //       starts with a sequence of zero and increases by one each time a
+    //       page is emitted.
+    //
     connector: IceCastWriter,
     clock: OggClock,
     playing_offline: bool,
