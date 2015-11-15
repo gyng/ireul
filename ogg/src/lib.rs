@@ -48,6 +48,18 @@ impl Borrow<OggTrack> for OggTrackBuf {
     }
 }
 
+impl AsRef<OggTrack> for OggTrackBuf {
+    fn as_ref(&self) -> &OggTrack {
+        OggTrack::from_u8_slice_unchecked(&self.inner)
+    }
+}
+
+impl AsMut<OggTrack> for OggTrackBuf {
+    fn as_mut(&mut self) -> &mut OggTrack {
+        OggTrack::from_u8_slice_unchecked_mut(&mut self.inner)
+    }
+}
+
 impl BorrowMut<OggTrack> for OggTrackBuf {
     fn borrow_mut(&mut self) -> &mut OggTrack {
         OggTrack::from_u8_slice_unchecked_mut(&mut self.inner)
@@ -138,7 +150,6 @@ pub struct TrackPageIterMut<'a> {
     offset: usize,
 }
 
-
 #[derive(Clone)]
 pub struct OggPageBuf {
     inner: Vec<u8>,
@@ -146,6 +157,18 @@ pub struct OggPageBuf {
 
 pub struct OggPage {
     inner: Slice,
+}
+
+impl AsRef<OggPage> for OggPageBuf {
+    fn as_ref(&self) -> &OggPage {
+        OggPage::from_u8_slice_unchecked(&self.inner)
+    }
+}
+
+impl AsMut<OggPage> for OggPageBuf {
+    fn as_mut(&mut self) -> &mut OggPage {
+        OggPage::from_u8_slice_unchecked_mut(&mut self.inner)
+    }
 }
 
 impl ops::Deref for OggPageBuf {

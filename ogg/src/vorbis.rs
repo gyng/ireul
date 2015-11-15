@@ -7,15 +7,12 @@ use std::io::{BufReader};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 
 use ::slice::Slice;
-// use ::OggPage;
 
 #[derive(Debug)]
 pub enum VorbisHeaderCheckError {
     BadCapture,
-    BadVersion,
     BadIdentificationHeader,
     BadIdentificationHeaderLength,
-    NotAnIdentificationHeader,
 }
 
 #[derive(Debug, PartialEq)]
@@ -112,13 +109,12 @@ impl VorbisHeader {
 
         match VorbisHeaderType::from_u8(buf[0]) {
             None => {
-                return Err(VorbisHeaderCheckError::BadCapture)
+                return Err(VorbisHeaderCheckError::BadCapture);
             },
             Some(VorbisHeaderType::IdentificationHeader) => {
                 try!(VorbisHeader::parse_identification_header(buf));
-                ()
             },
-            _ => {}
+            _ => ()
         }
 
         Ok(())
@@ -130,9 +126,9 @@ impl VorbisHeader {
     // }
 
     fn parse_identification_header(buf: &[u8]) -> Result<IdentificationHeader, VorbisHeaderCheckError> {
-        if VorbisHeaderType::from_u8(buf[0]).unwrap() != VorbisHeaderType::IdentificationHeader {
-            return Err(VorbisHeaderCheckError::NotAnIdentificationHeader)
-        }
+        // Must only be called on IdentificationHeader packets.
+        assert_eq!(VorbisHeaderType::from_u8(buf[0]).unwrap(),
+            VorbisHeaderType::IdentificationHeader);
 
         if buf.len() < 30 {
             return Err(VorbisHeaderCheckError::BadIdentificationHeaderLength)
@@ -177,10 +173,16 @@ impl VorbisHeader {
     }
 
     pub fn identification_header(&self) -> Option<IdentificationHeader> {
-        match VorbisHeader::parse_identification_header(self.as_u8_slice()) {
-            Ok(header) => Some(header),
-            Err(VorbisHeaderCheckError::NotAnIdentificationHeader) => None,
-            Err(_) => panic!("identification header parse error: this shouldn't happen")
+        let buf = self.as_u8_slice();
+
+        // We know the header is well-formed, so it must have a valid VorbisHeaderType
+        match VorbisHeaderType::from_u8(buf[0]).unwrap() {
+            VorbisHeaderType::IdentificationHeader => {
+                let id_header = VorbisHeader::parse_identification_header(buf)
+                    .expect("identification header parse error: this shouldn't happen");
+                Some(id_header)
+            },
+            _ => None
         }
     }
 }
