@@ -68,7 +68,4 @@ pub enum EnqueueTrackError {
     InvalidTrack,
 
     BadSampleRate,
-
-    // this should be moved, since everything will have it...
-    RemoteSerdeError,
 }

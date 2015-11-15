@@ -17,6 +17,7 @@ use ireul_interface::proxy::{
     SIZE_LIMIT,
     RequestWrapper,
     RequestType,
+    BinderError,
     EnqueueTrackRequest,
     EnqueueTrackError,
     TrackSkipToEndRequest,
@@ -135,41 +136,13 @@ impl Core {
         Ok(())
     }
 
-    fn enqueue_track_helper(&mut self, req: &[u8]) -> Vec<u8> {
-        let res = bincode::serde::deserialize(req)
-            .map_err(|_| EnqueueTrackError::RemoteSerdeError)
-            .and_then(|req| self.enqueue_track(req));
-
-        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
-    }
-
     fn track_skip_to_end(&mut self, req: TrackSkipToEndRequest) -> Result<(), TrackSkipToEndError> {
         unimplemented!();
     }
 
-    fn track_skip_to_end_helper(&mut self, req: &[u8]) -> Vec<u8> {
-        let res = bincode::serde::deserialize(req)
-            .map_err(|_| TrackSkipToEndError::RemoteSerdeError)
-            .and_then(|req| self.track_skip_to_end(req));
-
-        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
-    }
-
     fn handle_command(&mut self, req_wr: RequestWrapper) {
-        let RequestWrapper {
-            response_queue: response_queue,
-            req_type: req_type,
-            req_buf: req_buf,
-        } = req_wr;
-        let response = match req_type {
-            RequestType::EnqueueTrack => {
-                self.enqueue_track_helper(&req_buf)
-            },
-            RequestType::TrackSkipToEnd => {
-                self.track_skip_to_end_helper(&req_buf)
-            },
-        };
-        response_queue.send(response).unwrap();
+        let mut binder = CoreBinder { core: self };
+        binder.handle_command(req_wr)
     }
 
     fn tick(&mut self) {
@@ -180,6 +153,51 @@ impl Core {
             }
         }
         self.output.copy_page();
+    }
+}
+
+struct CoreBinder<'a> {
+    core: &'a mut Core,
+}
+
+impl<'a> CoreBinder<'a> {
+    fn handle_command(&mut self, req_wr: RequestWrapper) {
+        let RequestWrapper {
+            response_queue: response_queue,
+            req_type: req_type,
+            req_buf: req_buf,
+        } = req_wr;
+        let response = match req_type {
+            RequestType::EnqueueTrack => {
+                self.enqueue_track(&req_buf)
+            },
+            RequestType::TrackSkipToEnd => {
+                self.track_skip_to_end(&req_buf)
+            },
+        };
+        response_queue.send(response).unwrap();
+    }
+
+    fn enqueue_track(&mut self, req: &[u8]) -> Vec<u8> {
+        let res = bincode::serde::deserialize(req)
+            .map_err(|_| BinderError::RemoteSerdeError)
+            .and_then(|req| {
+                self.core.enqueue_track(req)
+                    .map_err(BinderError::CallError)
+            });
+
+        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
+    }
+
+    fn track_skip_to_end(&mut self, req: &[u8]) -> Vec<u8> {
+         let res: Result<(), BinderError<TrackSkipToEndError>> =
+            bincode::serde::deserialize::<TrackSkipToEndRequest>(req)
+                .map_err(|_| BinderError::RemoteSerdeError)
+                .and_then(|req| {
+                    Err(BinderError::StubImplementation)
+                });
+
+        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
     }
 }
 

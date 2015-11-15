@@ -18,7 +18,8 @@ impl Request for TrackSkipToEndRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-pub enum TrackSkipToEndError {
-    // this should be moved, since everything will have it...
-    RemoteSerdeError,
-}
+pub struct TrackSkipToEndError;
+//
+// pub enum TrackSkipToEndError {
+//     __Void,
+// }

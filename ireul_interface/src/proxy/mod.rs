@@ -37,10 +37,45 @@ pub struct RequestWrapper {
     pub req_buf: Vec<u8>,
 }
 
+pub type BinderResult<T, E> = Result<T, BinderError<E>>;
+
+// wire-safe error wrapper. converted to ProxyError afterwards.
+
+#[derive(Serialize, Deserialize)]
+pub enum BinderError<T> where T: Serialize + Deserialize {
+    CallError(T),
+    StubImplementation,
+    RemoteSerdeError,
+}
+
+impl<T> From<ProxyError<T>> for BinderError<T> where T: Serialize + Deserialize {
+    fn from(e: ProxyError<T>) -> Self {
+        match e {
+            ProxyError::CallError(val) => BinderError::CallError(val),
+            ProxyError::StubImplementation => BinderError::StubImplementation,
+            ProxyError::RemoteSerdeError => BinderError::RemoteSerdeError,
+            ProxyError::RpcError(_) => BinderError::RemoteSerdeError,
+        }
+    }
+}
+
 pub type ProxyResult<T, E> = Result<T, ProxyError<E>>;
+
 pub enum ProxyError<T> {
     CallError(T),
+    StubImplementation,
+    RemoteSerdeError,
     RpcError(RpcError),
+}
+
+impl<T> From<BinderError<T>> for ProxyError<T> where T: Serialize + Deserialize {
+    fn from(e: BinderError<T>) -> Self {
+        match e {
+            BinderError::CallError(val) => ProxyError::CallError(val),
+            BinderError::StubImplementation => ProxyError::StubImplementation,
+            BinderError::RemoteSerdeError => ProxyError::RemoteSerdeError,
+        }
+    }
 }
 
 impl<T> From<RpcError> for ProxyError<T> {
