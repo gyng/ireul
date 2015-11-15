@@ -16,7 +16,6 @@ pub enum VorbisHeaderCheckError {
     BadIdentificationHeader,
     BadIdentificationHeaderLength,
     NotAnIdentificationHeader,
-    HeaderNotImplemented,
 }
 
 #[derive(Debug, PartialEq)]
@@ -203,12 +202,6 @@ mod test {
 
     #[test]
     fn test_parse_identification_header() {
-        // [packettype]["vorbis"][version][channels]
-        // [sample_rate]
-        // [bitrate_maximum]
-        // [bitrate_nominal]
-        // [bitrate_minimum]
-        // [blocksize_0][blocksize_1][framing_flag]
         let header_buf = [
             0x01,                               // 0     packet type, 1 = id header
             0x76, 0x6f, 0x72, 0x62, 0x69, 0x73, // 1-6   vorbis
