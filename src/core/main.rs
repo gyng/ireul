@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::fs::File;
 
-use ogg::{OggTrackBuf, OggPageBuf};
+use ogg::{OggTrack, OggTrackBuf, OggPageBuf};
 use ogg_clock::OggClock;
 use ireul_interface::proxy::{
     SIZE_LIMIT,
@@ -19,6 +19,8 @@ use ireul_interface::proxy::{
     RequestType,
     EnqueueTrackRequest,
     EnqueueTrackError,
+    TrackSkipToEndRequest,
+    TrackSkipToEndError,
 };
 
 mod icecastwriter;
@@ -44,6 +46,7 @@ fn main() {
 
     let output_manager = OutputManager {
         connector: connector,
+        cur_serial: 0,
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
@@ -56,6 +59,47 @@ fn main() {
     loop {
         core.tick();
         println!("copied page");
+    }
+}
+
+fn validate_positions(track: &OggTrack) -> Result<(), ()> {
+    let mut current = 0;
+    let mut is_first = true;
+
+    for page in track.pages() {
+        let position = page.position();
+
+        if is_first {
+            is_first = false;
+
+            if position != 0 {
+                return Err(());
+            }
+        }
+
+        if position < current {
+            return Err(());
+        }
+        current = position;
+    }
+
+    Ok(())
+}
+
+fn check_sample_rate(req: u32, track: &OggTrack) -> Result<(), ()> {
+    Err(())
+}
+
+fn update_serial(serial: u32, track: &mut OggTrack) {
+    for page in track.pages_mut() {
+        page.set_serial(serial);
+    }
+}
+
+fn update_positions(start_pos: u64, track: &mut OggTrack) {
+    for page in track.pages_mut() {
+        let old_pos = page.position();
+        page.set_position(start_pos + old_pos);
     }
 }
 
@@ -78,13 +122,15 @@ impl Core {
     }
 
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<(), EnqueueTrackError> {
-        // TODO: validate position granule is strictly increasing
-        //       and begins with zero.
-        //
-        // TODO: ensure sample rate is equal to our ogg-clock's sample rate,
-        //       using the vorbis identification header.
-        //
-        self.output.play_queue.push_back(req.track);
+        let EnqueueTrackRequest { mut track } = req;
+
+        try!(validate_positions(&track)
+            .map_err(|()| EnqueueTrackError::InvalidTrack));
+
+        try!(check_sample_rate(self.output.clock.sample_rate(), &track)
+            .map_err(|()| EnqueueTrackError::BadSampleRate));
+
+        self.output.play_queue.push_back(track);
 
         Ok(())
     }
@@ -97,16 +143,30 @@ impl Core {
         bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
     }
 
+    fn track_skip_to_end(&mut self, req: TrackSkipToEndRequest) -> Result<(), TrackSkipToEndError> {
+        unimplemented!();
+    }
+
+    fn track_skip_to_end_helper(&mut self, req: &[u8]) -> Vec<u8> {
+        let res = bincode::serde::deserialize(req)
+            .map_err(|_| TrackSkipToEndError::RemoteSerdeError)
+            .and_then(|req| self.track_skip_to_end(req));
+
+        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
+    }
+
     fn handle_command(&mut self, req_wr: RequestWrapper) {
         let RequestWrapper {
             response_queue: response_queue,
             req_type: req_type,
             req_buf: req_buf,
         } = req_wr;
-
         let response = match req_type {
             RequestType::EnqueueTrack => {
                 self.enqueue_track_helper(&req_buf)
+            },
+            RequestType::TrackSkipToEnd => {
+                self.track_skip_to_end_helper(&req_buf)
             },
         };
         response_queue.send(response).unwrap();
@@ -134,6 +194,7 @@ struct OutputManager {
     //       page is emitted.
     //
     connector: IceCastWriter,
+    cur_serial: u32,
     clock: OggClock,
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
@@ -143,10 +204,16 @@ struct OutputManager {
 
 impl OutputManager {
     fn fill_buffer(&mut self) {
-        let track = match self.play_queue.pop_front() {
+        let mut track = match self.play_queue.pop_front() {
             Some(track) => track,
             None => self.offline_track.clone(),
         };
+
+        // not sure why we as_mut instead of just using &mut track
+        update_serial(self.cur_serial, track.as_mut());
+        self.cur_serial = self.cur_serial.wrapping_add(1);
+        update_positions(0, track.as_mut());
+
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
 

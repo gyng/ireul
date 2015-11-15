@@ -14,17 +14,20 @@ use bincode::serde::{
     deserialize,
 };
 
-mod enqueue_track;
+mod track;
 
-pub use self::enqueue_track::{
+pub use self::track::{
     EnqueueTrackRequest,
     EnqueueTrackError,
+    TrackSkipToEndRequest,
+    TrackSkipToEndError,
 };
 
 pub const SIZE_LIMIT: bincode::SizeLimit = bincode::SizeLimit::Bounded(20 * 1 << 20);
 
 pub enum RequestType {
     EnqueueTrack,
+    TrackSkipToEnd,
 }
 
 pub struct RequestWrapper {

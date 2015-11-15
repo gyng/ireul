@@ -2,7 +2,7 @@ use std::sync::mpsc::{TrySendError, RecvError};
 
 use serde::{ser, de};
 use ogg::{OggTrackBuf, OggTrack};
-use super::{RequestType, Request, RpcError};
+use super::super::{RequestType, Request, RpcError};
 
 pub struct EnqueueTrackRequest {
     pub track: OggTrackBuf,
@@ -66,6 +66,8 @@ impl Request for EnqueueTrackRequest {
 #[derive(Serialize, Deserialize)]
 pub enum EnqueueTrackError {
     InvalidTrack,
+
+    BadSampleRate,
 
     // this should be moved, since everything will have it...
     RemoteSerdeError,
