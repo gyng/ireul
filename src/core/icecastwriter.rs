@@ -78,11 +78,11 @@ impl IceCastWriter {
         }
 
         if let Some(url) = self.options.url {
-            try!(write!(self.stream, "Ice-Name: {}\r\n", url));
+            try!(write!(self.stream, "Ice-Url: {}\r\n", url));
         }
 
         if let Some(genre) = self.options.genre {
-            try!(write!(self.stream, "Ice-Name: {}\r\n", genre));
+            try!(write!(self.stream, "Ice-Genre: {}\r\n", genre));
         }
 
         // Do not reorder Content-Type! Somehow IceCast treated it as audio/mpeg when moved up
