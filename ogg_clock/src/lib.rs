@@ -21,7 +21,6 @@ impl AudioClock {
     }
 
     pub fn wait_delay(&self, now: SteadyTime, position: u64) -> Duration {
-        println!("({}, {}, {})", 1000, position, self.sample_rate);
         let milli_offset = (1000 * position / self.sample_rate) as i64;
         let current_pos = Duration::milliseconds(milli_offset);     
         let sleep_duration = self.start_time - now + current_pos;
@@ -46,7 +45,6 @@ impl OggClock {
     pub fn wait(&self, page: &OggPage) -> Result<(), ()> {
         let sleep_dur = self.0.wait_delay(SteadyTime::now(), page.position());
         if Duration::zero() < sleep_dur {
-            println!("pos = {}", sleep_dur);
             ::std::thread::sleep_ms(sleep_dur.num_milliseconds() as u32);
         }
         Ok(())

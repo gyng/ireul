@@ -26,6 +26,119 @@ pub enum OggPageCheckError {
 }
 
 #[derive(Clone)]
+pub struct OggTrackBuf {
+    inner: Vec<u8>,
+}
+
+pub struct OggTrack {
+    inner: Slice,
+}
+
+impl ops::Deref for OggTrackBuf {
+    type Target = OggTrack;
+
+    fn deref<'a>(&'a self) -> &'a OggTrack {
+        OggTrack::from_u8_slice_unchecked(&self.inner)
+    }
+}
+
+impl Borrow<OggTrack> for OggTrackBuf {
+    fn borrow(&self) -> &OggTrack {
+        OggTrack::from_u8_slice_unchecked(&self.inner)
+    }
+}
+
+impl BorrowMut<OggTrack> for OggTrackBuf {
+    fn borrow_mut(&mut self) -> &mut OggTrack {
+        OggTrack::from_u8_slice_unchecked_mut(&mut self.inner)
+    }
+}
+
+impl ToOwned for OggTrack {
+    type Owned = OggTrackBuf;
+
+    fn to_owned(&self) -> OggTrackBuf {
+        OggTrackBuf { inner: self.inner.to_owned() }
+    }
+}
+
+impl OggTrackBuf {
+    pub fn new(buf: Vec<u8>) -> Result<OggTrackBuf, OggPageCheckError> {
+        try!(OggTrack::new(&buf));
+        Ok(OggTrackBuf { inner: buf })
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.inner
+    }
+}
+
+impl OggTrack {
+    pub fn new(buf: &[u8]) -> Result<&OggTrack, OggPageCheckError>  {
+        let mut offset = 0;
+        while offset < buf.len() {
+            let page = try!(OggPage::new(&buf[offset..]));
+            offset += page.as_u8_slice().len();
+        }
+        Ok(OggTrack::from_u8_slice_unchecked(buf))
+    }
+
+    /// The following function allows unchecked construction of a ogg track
+    /// from a u8 slice.  This is private because it does not maintain
+    /// the OggPage invariant.
+    fn from_u8_slice_unchecked(s: &[u8]) -> &OggTrack {
+        unsafe { mem::transmute(s) }
+    }
+
+    /// The following (private!) function allows unchecked construction of a
+    /// mutable ogg page from a mutable u8 slice.  This is private because it
+    /// does not maintain the OggPage invariant.
+    fn from_u8_slice_unchecked_mut(s: &mut [u8]) -> &mut OggTrack {
+        unsafe { mem::transmute(s) }
+    }
+
+    pub fn as_u8_slice(&self) -> &[u8] {
+        &self.inner
+    }
+
+    pub fn pages(&self) -> TrackPageIter {
+        TrackPageIter {
+            data: self.as_u8_slice(),
+            offset: 0,
+        }
+    }
+
+    pub fn pages_mut(&self) -> TrackPageIterMut {
+        // TOOD(gyng): impl
+        unimplemented!();
+    }
+}
+
+pub struct TrackPageIter<'a> {
+    data: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> Iterator for TrackPageIter<'a> {
+    type Item = &'a OggPage;
+
+    fn next(&mut self) -> Option<&'a OggPage> {
+        if self.data.len() == self.offset {
+            return None;
+        }
+        let page = OggPage::new(&self.data[self.offset..]).unwrap();
+        self.offset += page.as_u8_slice().len();
+        Some(page)
+    }
+}
+
+pub struct TrackPageIterMut<'a> {
+    data: &'a mut [u8],
+    offset: usize,
+}
+
+
+#[derive(Clone)]
 pub struct OggPageBuf {
     inner: Vec<u8>,
 }

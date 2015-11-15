@@ -4,7 +4,6 @@
 extern crate ogg;
 extern crate ogg_clock;
 extern crate phf;
-extern crate phf_macros;
 
 use std::ffi::OsString;
 use std::env; // ::args_os;

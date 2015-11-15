@@ -104,7 +104,7 @@ mod test {
     use std::fs::File;
     use std::io::{self, Read};
 
-    use ogg::OggPage;
+    use ogg::OggTrackBuf;
     use ogg_clock::OggClock;
 
     use super::{IceCastWriter, IceCastWriterOptions};
@@ -114,7 +114,8 @@ mod test {
     pub fn push_ogg_to_icecast() {
         let mut file = io::BufReader::new(File::open("howbigisthis_repaired.ogg").unwrap());
         let mut buffer = Vec::new();
-        let _ = file.read_to_end(&mut buffer).unwrap();
+        file.read_to_end(&mut buffer).unwrap();
+        let track = OggTrackBuf::new(buffer).unwrap();
 
         let mut writer = IceCastWriter::new(IceCastWriterOptions {
             endpoint: "lollipop.hiphop:8000",
@@ -126,14 +127,9 @@ mod test {
         }).unwrap();
 
         let clock = OggClock::new(48000);
-        let mut offset = 0;
-
-        while offset < buffer.len() {
-            let page = OggPage::new(&buffer[offset..]).unwrap();
-            offset += page.as_u8_slice().len();
-
+        for page in track.pages() {
             writer.send_ogg_page(&page).unwrap();
-            let _ = clock.wait(&page);
+            clock.wait(&page).unwrap();
         }
     }
 }

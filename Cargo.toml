@@ -17,7 +17,13 @@ path = "./ogg"
 [dependencies.ogg_clock]
 path = "./ogg_clock"
 
+[dependencies.ireul_interface]
+path = "./ireul_interface"
+
 [dependencies]
 phf = "0.7.3"
 phf_macros = "0.7.3"
 rustc-serialize = "0.3.16"
+serde = "*"
+serde_macros = "*"
+bincode = "*"

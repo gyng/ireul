@@ -1,60 +1,46 @@
+extern crate bincode;
 extern crate ogg;
 extern crate ogg_clock;
 extern crate rustc_serialize;
+extern crate serde;
+extern crate ireul_interface;
 
-use std::sync::mpsc::{self, TrySendError, RecvError};
+use std::sync::mpsc::{self};
 use std::net::TcpListener;
 use std::collections::VecDeque;
-use std::path::Path;
 use std::io::{self, Read};
-use std::fs::{self, File};
-use std::net::{self, TcpStream};
+use std::fs::File;
 
-use ogg::{OggPage, OggPageBuf, OggPageCheckError};
+use ogg::{OggTrackBuf, OggPageBuf};
 use ogg_clock::OggClock;
+use ireul_interface::proxy::{
+    SIZE_LIMIT,
+    RequestWrapper,
+    RequestType,
+    EnqueueTrackRequest,
+    EnqueueTrackError,
+};
 
-mod proxy;
-mod oggutil;
 mod icecastwriter;
 
 use icecastwriter::{
     IceCastWriter,
     IceCastWriterOptions,
 };
-use oggutil::OggTrack;
-use proxy::{
-    CoreProxyRequest,
-    CoreProxyResponse,
-    CoreProxyCommand,
-    EnqueueTrackError,
-};
-
-fn make_ogg_track(buffer: &[u8]) -> Result<OggTrack, OggPageCheckError> {
-    let mut offset = 0;
-    let mut pages = Vec::new();
-    while offset < buffer.len() {
-        let page: &OggPage = try!(OggPage::new(&buffer[offset..]));
-        offset += page.as_u8_slice().len();
-        pages.push(page.to_owned());
-    }
-    Ok(OggTrack {
-        pages: pages,
-    })
-}
 
 fn main() {
     let icecast_options = IceCastWriterOptions {
         endpoint: "lollipop.hiphop:8000",
         mount: "/ireul",
-        user_pass: Some("source:3ay4fgdzkkcaokmo9e8k"),
+        user_pass: Some("source:x"),
         ..Default::default()
     };
-    let mut connector = IceCastWriter::new(icecast_options).unwrap();
+    let connector = IceCastWriter::new(icecast_options).unwrap();
 
     let mut file = File::open("howbigisthis.ogg").unwrap();
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();
-    let offline_track = make_ogg_track(&buffer).unwrap();
+    let offline_track = OggTrackBuf::new(buffer).unwrap();
 
     let output_manager = OutputManager {
         connector: connector,
@@ -69,17 +55,16 @@ fn main() {
     let mut core = Core::new(control, output_manager).unwrap();
     loop {
         core.tick();
+        println!("copied page");
     }
     // Handler::new("/tmp/ireul-core").unwrap().start().unwrap();
 }
 
-enum CoreNotify {}
-
 struct Core {
     control: TcpListener,
     output: OutputManager,
-    proxy_tx: mpsc::SyncSender<CoreProxyRequest>,
-    proxy_rx: mpsc::Receiver<CoreProxyRequest>,
+    proxy_tx: mpsc::SyncSender<RequestWrapper>,
+    proxy_rx: mpsc::Receiver<RequestWrapper>,
 }
 
 impl Core {
@@ -93,34 +78,41 @@ impl Core {
         })
     }
 
-    fn get_proxy(&mut self) -> CoreProxy {
-        CoreProxy {
-            sender: self.proxy_tx.clone(),
-        }
+    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<(), EnqueueTrackError> {
+        // TODO: validate monotonic position granule.
+
+        self.output.play_queue.push_back(req.track);
+        Ok(())
     }
 
-    fn enqueue_track(&mut self, track: OggTrack) {
-        self.output.play_queue.push_back(track);
+    fn enqueue_track_helper(&mut self, req: &[u8]) -> Vec<u8> {
+        let res = bincode::serde::deserialize(req)
+            .map_err(|_| EnqueueTrackError::RemoteSerdeError)
+            .and_then(|req| self.enqueue_track(req));
+
+        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
+    }
+
+    fn handle_command(&mut self, req_wr: RequestWrapper) {
+        let RequestWrapper {
+            response_queue: response_queue,
+            req_type: req_type,
+            req_buf: req_buf,
+        } = req_wr;
+
+        let response = match req_type {
+            RequestType::EnqueueTrack => {
+                self.enqueue_track_helper(&req_buf)
+            },
+        };
+        response_queue.send(response).unwrap();
     }
 
     fn tick(&mut self) {
         loop {
-            if let Ok(cmd) = self.proxy_rx.try_recv() {
-                let CoreProxyRequest {
-                    response_queue: response_queue,
-                    command: command,
-                } = cmd;
-                match command {
-                    CoreProxyCommand::EnqueueTrack(track) => {
-                        self.enqueue_track(track);
-                        response_queue.send(CoreProxyResponse::Unit).unwrap()
-                    },
-                    // _ => {
-                    //     // respond with error
-                    // }
-                }
-            } else {
-                break;
+            match self.proxy_rx.try_recv() {
+                Ok(cmd) => self.handle_command(cmd),
+                Err(err) => break,
             }
         }
         self.output.copy_page();
@@ -133,8 +125,8 @@ struct OutputManager {
     clock: OggClock,
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
-    play_queue: VecDeque<OggTrack>,
-    offline_track: OggTrack,
+    play_queue: VecDeque<OggTrackBuf>,
+    offline_track: OggTrackBuf,
 }
 
 impl OutputManager {
@@ -143,7 +135,7 @@ impl OutputManager {
             Some(track) => track,
             None => self.offline_track.clone(),
         };
-        self.buffer.extend(track.pages.into_iter());
+        self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
 
     fn get_next_page(&mut self) -> OggPageBuf {
@@ -155,6 +147,7 @@ impl OutputManager {
 
     fn copy_page(&mut self) {
         let page = self.get_next_page();
+        self.clock.wait(&page).unwrap();
         self.connector.send_ogg_page(&page).unwrap();
     }
 }
@@ -170,45 +163,3 @@ impl OutputManager {
 //     }
 // }
 
-struct CoreProxy {
-    sender: mpsc::SyncSender<CoreProxyRequest>
-}
-
-impl CoreProxy {
-    pub fn enqueue_track(&mut self, track: OggTrack) -> Result<(), EnqueueTrackError> {
-        let (tx, rx) = mpsc::sync_channel(1);
-        let req = CoreProxyRequest {
-            response_queue: tx,
-            command: CoreProxyCommand::EnqueueTrack(track),
-        };
-        match self.sender.try_send(req) {
-            Ok(()) => (),
-            Err(TrySendError::Full(req)) => {
-                let track = match req.command {
-                    CoreProxyCommand::EnqueueTrack(track) => track,
-                    // _ => unreachable!(),
-                };
-                
-                let full = TrySendError::Full(track);
-                return Err(EnqueueTrackError::SendError(full));
-            },
-            Err(TrySendError::Disconnected(req)) => {
-                let track = match req.command {
-                    CoreProxyCommand::EnqueueTrack(track) => track,
-                    // _ => unreachable!(),
-                };
-
-                let disconnected = TrySendError::Disconnected(track);
-                return Err(EnqueueTrackError::SendError(disconnected));
-            },
-        };
-        match rx.recv() {
-            Ok(res) => Ok(()),
-            Err(err) => Err(From::from(err))
-        }
-    }
-}
-
-enum AddTrackError {
-    SendError(mpsc::TrySendError<OggTrack>),
-}
