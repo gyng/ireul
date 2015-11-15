@@ -1,6 +1,7 @@
 extern crate byteorder;
 
 mod slice;
+mod vorbis;
 
 use std::mem;
 use std::ops;
@@ -55,7 +56,7 @@ impl BorrowMut<OggPage> for OggPageBuf {
 
 impl ToOwned for OggPage {
     type Owned = OggPageBuf;
-    
+
     fn to_owned(&self) -> OggPageBuf {
         OggPageBuf { inner: self.inner.to_owned() }
     }
@@ -130,7 +131,7 @@ impl OggPage {
             return Err(OggPageCheckError::BadCapture);
         }
 
-        cursor.consume(4);  // capture sequence 
+        cursor.consume(4);  // capture sequence
         if try!(cursor.read_u8()) != 0 {
             return Err(OggPageCheckError::BadVersion);
         }
