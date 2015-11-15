@@ -6,6 +6,7 @@ mod vorbis;
 use std::mem;
 use std::ops;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
+use std::marker;
 use std::io::{Cursor, BufRead};
 use std::marker::PhantomData;
 use std::borrow::Cow;
@@ -113,6 +114,12 @@ impl OggTrack {
         &self.inner
     }
 
+    /// Mutably borrow the underlying storage.  This is private because it
+    /// does not maintain the OggPage invariant.
+    fn as_u8_slice_mut(&mut self) -> &mut [u8] {
+        unsafe { mem::transmute(self) }
+    }
+
     pub fn pages(&self) -> TrackPageIter {
         TrackPageIter {
             data: self.as_u8_slice(),
@@ -120,9 +127,15 @@ impl OggTrack {
         }
     }
 
-    pub fn pages_mut(&self) -> TrackPageIterMut {
-        // TODO: impl
-        unimplemented!();
+    pub fn pages_mut(&mut self) -> TrackPageIterMut {
+        let buffer = self.as_u8_slice_mut();
+        let ptr = buffer.as_mut_ptr();
+        let end = unsafe { ptr.offset(buffer.len() as isize) };
+        TrackPageIterMut {
+            ptr: ptr,
+            end: end,
+            _marker: marker::PhantomData,
+        }
     }
 }
 
@@ -144,10 +157,36 @@ impl<'a> Iterator for TrackPageIter<'a> {
     }
 }
 
-// TODO: iterate &mut OggPage
 pub struct TrackPageIterMut<'a> {
-    data: &'a mut [u8],
-    offset: usize,
+    ptr: *mut u8,
+    end: *mut u8,
+    _marker: marker::PhantomData<&'a mut ()>,
+}
+
+impl<'a> Iterator for TrackPageIterMut<'a> {
+    type Item = &'a mut OggPage;
+
+    fn next(&mut self) -> Option<&'a mut OggPage> {
+        if self.ptr == self.end {
+            return None;
+        }
+
+        let length = self.end as usize - self.ptr as usize;
+        let next_boundary = {
+            let remaining_data = unsafe { std::slice::from_raw_parts(self.ptr, length) };
+            let page_len = OggPage::new(remaining_data).unwrap().as_u8_slice().len();
+            assert!(page_len <= length);
+            page_len
+        };
+
+        let page_data;
+        unsafe {
+            page_data = std::slice::from_raw_parts_mut(self.ptr, next_boundary);
+            self.ptr = self.ptr.offset(next_boundary as isize);
+        }
+
+        Some(OggPage::from_u8_slice_unchecked_mut(page_data))
+    }
 }
 
 #[derive(Clone)]
