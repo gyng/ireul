@@ -32,12 +32,12 @@ use icecastwriter::{
 };
 
 fn main() {
-    let icecast_options = IceCastWriterOptions {
-        endpoint: "lollipop.hiphop:8000",
-        mount: "/ireul",
-        user_pass: Some("source:x"),
-        ..Default::default()
-    };
+    let mut icecast_options = IceCastWriterOptions::default();
+    icecast_options
+        .set_endpoint("lollipop.hiphop:8000")
+        .set_mount("/ireul")
+        .set_user_pass("source:x");
+
     let connector = IceCastWriter::new(icecast_options).unwrap();
 
     let mut file = File::open("howbigisthis.ogg").unwrap();
