@@ -4,6 +4,9 @@ extern crate ogg_clock;
 extern crate rustc_serialize;
 extern crate serde;
 extern crate ireul_interface;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 use std::sync::mpsc::{self};
 use std::net::TcpListener;
@@ -32,6 +35,8 @@ use icecastwriter::{
 };
 
 fn main() {
+    env_logger::init().unwrap();
+
     let mut icecast_options = IceCastWriterOptions::default();
     icecast_options
         .set_endpoint("lollipop.hiphop:8000")
@@ -59,7 +64,7 @@ fn main() {
     let mut core = Core::new(control, output_manager).unwrap();
     loop {
         core.tick();
-        println!("copied page");
+        debug!("copied page");
     }
 }
 
@@ -88,7 +93,8 @@ fn validate_positions(track: &OggTrack) -> Result<(), ()> {
 }
 
 fn check_sample_rate(req: u32, track: &OggTrack) -> Result<(), ()> {
-    Err(())
+    warn!("check_sample_rate: STUB");
+    Ok(())
 }
 
 fn update_serial(serial: u32, track: &mut OggTrack) {
@@ -190,6 +196,7 @@ impl<'a> CoreBinder<'a> {
     }
 
     fn track_skip_to_end(&mut self, req: &[u8]) -> Vec<u8> {
+        warn!("unimplemented: client request TrackSkipToEndRequest");
          let res: Result<(), BinderError<TrackSkipToEndError>> =
             bincode::serde::deserialize::<TrackSkipToEndRequest>(req)
                 .map_err(|_| BinderError::RemoteSerdeError)
