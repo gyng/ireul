@@ -45,7 +45,7 @@ fn main() {
     icecast_options
         .set_endpoint("lollipop.hiphop:8000")
         .set_mount("/ireul")
-        .set_user_pass("source:x");
+        .set_user_pass("source:3ay4fgdzkkcaokmo9e8k");
 
     let connector = IceCastWriter::new(icecast_options).unwrap();
 
@@ -57,6 +57,7 @@ fn main() {
     let output_manager = OutputManager {
         connector: connector,
         cur_serial: 0,
+        cur_sequence: 0,
         position: 0,
         clock: OggClock::new(48000),
         playing_offline: false,
@@ -69,7 +70,7 @@ fn main() {
     let mut core = Core::new(control, output_manager).unwrap();
     loop {
         core.tick();
-        debug!("copied page");
+
     }
 }
 
@@ -106,6 +107,15 @@ fn update_serial(serial: u32, track: &mut OggTrack) {
     for page in track.pages_mut() {
         page.set_serial(serial);
     }
+}
+
+fn update_sequence(sequence: &mut u32, track: &mut OggTrack) {
+    // FIXME: using this as-is segfaults icecast.
+    //
+    // for page in track.pages_mut() {
+    //     page.set_sequence(*sequence);
+    //     *sequence = sequence.wrapping_add(1);
+    // }
 }
 
 fn update_positions(start_pos: u64, track: &mut OggTrack) {
@@ -147,6 +157,16 @@ impl Core {
 
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<(), EnqueueTrackError> {
         let EnqueueTrackRequest { mut track } = req;
+        {
+            let mut pages = 0;
+            let mut samples = 0;
+            for page in track.pages() {
+                pages += 1;
+                samples = page.position();
+            }
+
+            info!("a client sent {} samples in {} pages", samples, pages);
+        }
 
         try!(validate_positions(&track)
             .map_err(|()| EnqueueTrackError::InvalidTrack));
@@ -155,7 +175,6 @@ impl Core {
             .map_err(|()| EnqueueTrackError::BadSampleRate));
 
         self.output.play_queue.push_back(track);
-
         Ok(())
     }
 
@@ -188,6 +207,11 @@ fn client_worker(mut stream: TcpStream, chan: mpsc::SyncSender<RequestWrapper>) 
         }
 
         let op_code = try!(stream.read_u32::<BigEndian>());
+        if op_code == 0 {
+            info!("goodbye, client");
+            return Ok(());
+        }
+
         let req_type = try!(RequestType::from_op_code(op_code).map_err(|_| {
             let err_msg = format!("unknown op-code {:?}", op_code);
             io::Error::new(io::ErrorKind::Other, err_msg)
@@ -201,7 +225,6 @@ fn client_worker(mut stream: TcpStream, chan: mpsc::SyncSender<RequestWrapper>) 
         }
 
         let mut req_buf = Vec::new();
-
         {
             let mut limit_reader = Read::by_ref(&mut stream).take(frame_length as u64);
             try!(limit_reader.read_to_end(&mut req_buf));
@@ -232,9 +255,10 @@ fn client_acceptor(server: TcpListener, chan: mpsc::SyncSender<RequestWrapper>) 
         match stream {
             Ok(stream) => {
                 let client_chan = chan.clone();
-
                 thread::spawn(move || {
-                    client_worker(stream, client_chan);
+                    if let Err(err) = client_worker(stream, client_chan) {
+                        info!("client disconnected with error: {:?}", err);
+                    }
                 });
             },
             Err(err) => {
@@ -250,6 +274,7 @@ struct CoreBinder<'a> {
 
 impl<'a> CoreBinder<'a> {
     fn handle_command(&mut self, req_wr: RequestWrapper) {
+        info!("CoreBinder::handle_command");
         let RequestWrapper {
             response_queue: response_queue,
             req_type: req_type,
@@ -267,11 +292,18 @@ impl<'a> CoreBinder<'a> {
     }
 
     fn enqueue_track(&mut self, req: &[u8]) -> Vec<u8> {
+        info!("CoreBinder::enqueue_track");
         let res = bincode::serde::deserialize(req)
-            .map_err(|_| BinderError::RemoteSerdeError)
+            .map_err(|err| {
+                info!("serde error: {:?}", err);
+                BinderError::RemoteSerdeError
+            })
             .and_then(|req| {
+                let req: Vec<u8> = req;
+                println!("req len = {:?}", req.len());
+                let req = EnqueueTrackRequest { track: OggTrackBuf::new(req).unwrap() };
                 self.core.enqueue_track(req)
-                    .map_err(BinderError::CallError)
+                   .map_err(BinderError::CallError)
             });
 
         bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
@@ -302,6 +334,7 @@ struct OutputManager {
     //
     connector: IceCastWriter,
     cur_serial: u32,
+    cur_sequence: u32,
     clock: OggClock,
 
     // the position at the end of the currently playing track
@@ -322,10 +355,10 @@ impl OutputManager {
 
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
-        self.cur_serial = self.cur_serial.wrapping_add(1);
+        update_sequence(&mut self.cur_sequence, track.as_mut());
+        self.cur_serial = self.cur_serial.wrapping_add(0);
         update_positions(self.position, track.as_mut());
         self.position = final_position(&track).unwrap();
-
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
 
@@ -340,6 +373,11 @@ impl OutputManager {
         let page = self.get_next_page();
         self.clock.wait(&page).unwrap();
         self.connector.send_ogg_page(&page).unwrap();
+
+        debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}",
+            page.position(),
+            page.serial(),
+            page.sequence());
     }
 }
 

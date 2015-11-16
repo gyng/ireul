@@ -40,8 +40,8 @@ impl RequestType {
         }
     }
 
-    pub fn to_op_code(reqty: RequestType) -> u32 {
-        match reqty {
+    pub fn to_op_code(&self) -> u32 {
+        match *self {
             RequestType::EnqueueTrack => OP_ENQUEUE_TRACK,
             RequestType::TrackSkipToEnd => unimplemented!(),
         }
