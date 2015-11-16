@@ -57,6 +57,7 @@ fn main() {
     let output_manager = OutputManager {
         connector: connector,
         cur_serial: 0,
+        position: 0,
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
@@ -112,6 +113,14 @@ fn update_positions(start_pos: u64, track: &mut OggTrack) {
         let old_pos = page.position();
         page.set_position(start_pos + old_pos);
     }
+}
+
+fn final_position(track: &OggTrack) -> Option<u64> {
+    let mut position = None;
+    for page in track.pages() {
+        position = Some(page.position());
+    }
+    position
 }
 
 struct Core {
@@ -294,6 +303,10 @@ struct OutputManager {
     connector: IceCastWriter,
     cur_serial: u32,
     clock: OggClock,
+
+    // the position at the end of the currently playing track
+    position: u64,
+
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
     play_queue: VecDeque<OggTrackBuf>,
@@ -310,7 +323,8 @@ impl OutputManager {
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
         self.cur_serial = self.cur_serial.wrapping_add(1);
-        update_positions(0, track.as_mut());
+        update_positions(self.position, track.as_mut());
+        self.position = final_position(&track).unwrap();
 
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
