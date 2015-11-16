@@ -25,10 +25,29 @@ pub use self::track::{
 
 pub const SIZE_LIMIT: bincode::SizeLimit = bincode::SizeLimit::Bounded(20 * 1 << 20);
 
+pub const OP_ENQUEUE_TRACK: u32 = 0x1000;
+
 pub enum RequestType {
     EnqueueTrack,
     TrackSkipToEnd,
 }
+
+impl RequestType {
+    pub fn from_op_code(op_code: u32) -> Result<RequestType, ()> {
+        match op_code {
+            OP_ENQUEUE_TRACK => Ok(RequestType::EnqueueTrack),
+            _ => Err(())
+        }
+    }
+
+    pub fn to_op_code(reqty: RequestType) -> u32 {
+        match reqty {
+            RequestType::EnqueueTrack => OP_ENQUEUE_TRACK,
+            RequestType::TrackSkipToEnd => unimplemented!(),
+        }
+    }
+}
+
 
 pub struct RequestWrapper {
     // the Vec<u8>s are a bincode serialized representation

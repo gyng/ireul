@@ -7,12 +7,16 @@ extern crate ireul_interface;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
+extern crate byteorder;
 
+use std::thread;
 use std::sync::mpsc::{self};
-use std::net::TcpListener;
+use std::net::{TcpStream, TcpListener};
 use std::collections::VecDeque;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::fs::File;
+
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use ogg::{OggTrack, OggTrackBuf, OggPageBuf};
 use ogg_clock::OggClock;
@@ -111,19 +115,23 @@ fn update_positions(start_pos: u64, track: &mut OggTrack) {
 }
 
 struct Core {
-    control: TcpListener,
     output: OutputManager,
-    proxy_tx: mpsc::SyncSender<RequestWrapper>,
+    // proxy_tx: mpsc::SyncSender<RequestWrapper>,
     proxy_rx: mpsc::Receiver<RequestWrapper>,
 }
 
 impl Core {
     fn new(control: TcpListener, om: OutputManager) -> io::Result<Core> {
         let (tx, rx) = mpsc::sync_channel(5);
+
+        let proxy_tx_client = tx.clone();
+        thread::spawn(move || {
+            client_acceptor(control, proxy_tx_client);
+        });
+
         Ok(Core {
-            control: control,
             output: om,
-            proxy_tx: tx,
+            // proxy_tx: tx,
             proxy_rx: rx,
         })
     }
@@ -159,6 +167,71 @@ impl Core {
             }
         }
         self.output.copy_page();
+    }
+}
+
+fn client_worker(mut stream: TcpStream, chan: mpsc::SyncSender<RequestWrapper>) -> io::Result<()> {
+    const BUFFER_SIZE_LIMIT: usize = 20 * 1 << 20;
+    loop {
+        let version = try!(stream.read_u8());
+        if version != 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "invalid version"));
+        }
+
+        let op_code = try!(stream.read_u32::<BigEndian>());
+        let req_type = try!(RequestType::from_op_code(op_code).map_err(|_| {
+            let err_msg = format!("unknown op-code {:?}", op_code);
+            io::Error::new(io::ErrorKind::Other, err_msg)
+        }));
+
+        let frame_length = try!(stream.read_u32::<BigEndian>()) as usize;
+        if BUFFER_SIZE_LIMIT < frame_length {
+            let err_msg = format!("datagram too large: {} bytes (limit is {})",
+                frame_length, BUFFER_SIZE_LIMIT);
+            return Err(io::Error::new(io::ErrorKind::Other, err_msg));
+        }
+
+        let mut req_buf = Vec::new();
+
+        {
+            let mut limit_reader = Read::by_ref(&mut stream).take(frame_length as u64);
+            try!(limit_reader.read_to_end(&mut req_buf));
+        }
+
+        if req_buf.len() != frame_length {
+            let err_msg = format!(
+                "datagram truncated: got {} bytes, expected {}",
+                req_buf.len(), frame_length);
+            return Err(io::Error::new(io::ErrorKind::Other, err_msg));
+        }
+
+        let (resp_tx, resp_rx) = mpsc::sync_channel(1);
+        chan.send(RequestWrapper {
+            response_queue: resp_tx,
+            req_type: req_type,
+            req_buf: req_buf,
+        }).unwrap();
+
+        let response = resp_rx.recv().unwrap();
+        try!(stream.write_u32::<BigEndian>(response.len() as u32));
+        try!(stream.write_all(&response));
+    }
+}
+
+fn client_acceptor(server: TcpListener, chan: mpsc::SyncSender<RequestWrapper>) {
+    for stream in server.incoming() {
+        match stream {
+            Ok(stream) => {
+                let client_chan = chan.clone();
+
+                thread::spawn(move || {
+                    client_worker(stream, client_chan);
+                });
+            },
+            Err(err) => {
+                info!("error accepting new client: {:?}", err);
+            }
+        }
     }
 }
 

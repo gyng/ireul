@@ -3,6 +3,7 @@ name = "ireul"
 version = "0.0.1"
 dependencies = [
  "bincode 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "byteorder 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "ireul_interface 0.1.0",
  "log 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -51,6 +52,11 @@ dependencies = [
 [[package]]
 name = "byteorder"
 version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "byteorder"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
