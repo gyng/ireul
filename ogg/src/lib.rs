@@ -1,8 +1,5 @@
 extern crate byteorder;
 
-mod slice;
-mod vorbis;
-
 use std::mem;
 use std::ops;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
@@ -10,13 +7,20 @@ use std::marker;
 use std::io::{Cursor, BufRead};
 use std::marker::PhantomData;
 use std::borrow::Cow;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use byteorder::Error as ByteOrderError;
+
+mod slice;
+mod vorbis;
+mod crc;
+
 use slice::Slice;
 
 const OGG_PAGE_CAPTURE: &'static [u8] = b"OggS";
 const POSITION_OFFSET: usize = 6;
 const SERIAL_OFFSET: usize = 14;
+const CHECKSUM_OFFSET: usize = 22;
 
 #[derive(Debug)]
 pub enum OggPageCheckError {
@@ -277,7 +281,9 @@ impl OggPage {
 
     pub fn new(buf: &[u8]) -> Result<&OggPage, OggPageCheckError> {
         let buffer = try!(OggPage::measure_whole(buf));
-        Ok(OggPage::from_u8_slice_unchecked(buffer))
+        let page = OggPage::from_u8_slice_unchecked(buffer);
+        try!(page.validate_checksum());
+        Ok(page)
     }
 
     pub fn new_mut(buf: &mut [u8]) -> Result<&mut OggPage, OggPageCheckError> {
@@ -285,7 +291,9 @@ impl OggPage {
             let (hbuf, bbuf) = try!(OggPage::measure(buf));
             hbuf.len() + bbuf.len()
         };
-        Ok(OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]))
+        let page = OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]);
+        try!(page.validate_checksum());
+        Ok(page)
     }
 
     fn measure(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
@@ -373,8 +381,39 @@ impl OggPage {
         tx.set_serial(serial);
     }
 
+    fn checksum_helper(&self) -> u32 {
+        let self_buf = self.as_u8_slice();
+
+        let mut crc32 = 0;
+        for (idx, &byte) in self_buf.iter().enumerate() {
+            if CHECKSUM_OFFSET <= idx && idx < CHECKSUM_OFFSET + 4 {
+                crc::crc32(&mut crc32, 0);
+            } else {
+                crc::crc32(&mut crc32, byte);
+            }
+        }
+        crc32
+    }
+
+    fn validate_checksum(&self) -> Result<(), OggPageCheckError> {
+        let computed = self.checksum_helper();
+
+        let self_buf = self.as_u8_slice();
+        let crc_buf = &self_buf[CHECKSUM_OFFSET..CHECKSUM_OFFSET+4];
+        let in_page = LittleEndian::read_u32(crc_buf);
+
+        if computed == in_page {
+            Ok(())
+        } else {
+            Err(OggPageCheckError::BadCrc)
+        }
+    }
+
     fn recompute_checksum(&mut self) {
-        unimplemented!();
+        let crc32 = self.checksum_helper();
+        let self_buf = self.as_u8_slice_mut();
+        let crc_buf = &mut self_buf[CHECKSUM_OFFSET..CHECKSUM_OFFSET+4];
+        LittleEndian::write_u32(crc_buf, crc32);
     }
 
     pub fn begin<'a>(&'a mut self) -> ChecksumGuard<'a> {
