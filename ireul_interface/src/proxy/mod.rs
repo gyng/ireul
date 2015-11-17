@@ -18,6 +18,7 @@ mod track;
 
 pub use self::track::{
     EnqueueTrackRequest,
+    EnqueueTrackResult,
     EnqueueTrackError,
     TrackSkipToEndRequest,
     TrackSkipToEndError,

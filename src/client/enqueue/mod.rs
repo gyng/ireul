@@ -11,7 +11,8 @@ use ireul_interface::proxy::{
     SIZE_LIMIT,
     RequestType,
     EnqueueTrackRequest,
-    EnqueueTrackError
+    EnqueueTrackResult,
+    EnqueueTrackError,
 };
 
 use ::entrypoint::EntryPoint;
@@ -99,7 +100,9 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
         try!(limit_reader.read_to_end(&mut resp_buf));
     }
 
-    println!("got response: {:?}", resp_buf);
+    let res: EnqueueTrackResult = bincode::deserialize(&resp_buf).unwrap();
+    println!("got response: {:?}", res);
+
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(0));
 

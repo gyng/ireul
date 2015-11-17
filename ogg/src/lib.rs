@@ -480,7 +480,7 @@ impl<'a> ChecksumGuard<'a> {
     pub fn set_sequence(&mut self, sequence: u32) {
         let self_buf = self.page.as_u8_slice_mut();
         let seq_slice = &mut self_buf[SEQUENCE_OFFSET..SEQUENCE_OFFSET+4];
-        LittleEndian::write_u32(seq_slice, sequence)
+        LittleEndian::write_u32(seq_slice, sequence);
     }
 }
 

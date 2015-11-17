@@ -34,7 +34,11 @@ impl AudioClock {
     }
 }
 
-pub struct OggClock(AudioClock);
+pub struct OggClock {
+    clock: AudioClock,
+    last_pos: u64,
+    base_pos: u64,
+}
 
 impl OggClock {
     pub fn new(sample_rate: u32) -> OggClock {
@@ -42,22 +46,35 @@ impl OggClock {
     }
 
     pub fn new_with_start(sample_rate: u32, start_time: SteadyTime) -> OggClock {
-        OggClock(AudioClock {
-            sample_rate: sample_rate,
-            start_time: start_time,
-        })
+        OggClock {
+            clock: AudioClock {
+                sample_rate: sample_rate,
+                start_time: start_time,
+            },
+            last_pos: 0,
+            base_pos: 0,
+        }
     }
 
     #[inline]
     pub fn sample_rate(&self) -> u32 {
-        self.0.sample_rate()
+        self.clock.sample_rate()
     }
 
-    pub fn wait(&self, page: &OggPage) -> Result<(), ()> {
-        let sleep_dur = self.0.wait_delay(SteadyTime::now(), page.position());
+    pub fn wait(&mut self, page: &OggPage) -> Result<(), ()> {
+        let new_pos = page.position();
+        if self.base_pos + new_pos < self.last_pos {
+            self.base_pos = self.last_pos;
+        }
+
+        let abs_pos = self.base_pos + new_pos;
+        self.last_pos = abs_pos;
+        let sleep_dur = self.clock.wait_delay(SteadyTime::now(), abs_pos);
+
         if Duration::zero() < sleep_dur {
             ::std::thread::sleep_ms(sleep_dur.num_milliseconds() as u32);
         }
+
         Ok(())
     }
 }
