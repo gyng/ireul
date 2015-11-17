@@ -1,8 +1,5 @@
 extern crate byteorder;
 
-mod slice;
-mod vorbis;
-
 use std::mem;
 use std::ops;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
@@ -10,13 +7,21 @@ use std::marker;
 use std::io::{Cursor, BufRead};
 use std::marker::PhantomData;
 use std::borrow::Cow;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use byteorder::Error as ByteOrderError;
+
+mod slice;
+mod vorbis;
+mod crc;
+
 use slice::Slice;
 
 const OGG_PAGE_CAPTURE: &'static [u8] = b"OggS";
 const POSITION_OFFSET: usize = 6;
 const SERIAL_OFFSET: usize = 14;
+const SEQUENCE_OFFSET: usize = 18;
+const CHECKSUM_OFFSET: usize = 22;
 
 #[derive(Debug)]
 pub enum OggPageCheckError {
@@ -277,7 +282,9 @@ impl OggPage {
 
     pub fn new(buf: &[u8]) -> Result<&OggPage, OggPageCheckError> {
         let buffer = try!(OggPage::measure_whole(buf));
-        Ok(OggPage::from_u8_slice_unchecked(buffer))
+        let page = OggPage::from_u8_slice_unchecked(buffer);
+        try!(page.validate_checksum());
+        Ok(page)
     }
 
     pub fn new_mut(buf: &mut [u8]) -> Result<&mut OggPage, OggPageCheckError> {
@@ -285,7 +292,9 @@ impl OggPage {
             let (hbuf, bbuf) = try!(OggPage::measure(buf));
             hbuf.len() + bbuf.len()
         };
-        Ok(OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]))
+        let page = OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]);
+        try!(page.validate_checksum());
+        Ok(page)
     }
 
     fn measure(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
@@ -373,8 +382,50 @@ impl OggPage {
         tx.set_serial(serial);
     }
 
+    pub fn sequence(&self) -> u32 {
+        let self_buf = self.as_u8_slice();
+        let mut cur = Cursor::new(&self_buf[SEQUENCE_OFFSET..SEQUENCE_OFFSET+4]);
+        cur.read_u32::<LittleEndian>().unwrap()
+    }
+
+    pub fn set_sequence(&mut self, serial: u32) {
+        let mut tx = self.begin();
+        tx.set_sequence(serial);
+    }
+
+    fn checksum_helper(&self) -> u32 {
+        let self_buf = self.as_u8_slice();
+
+        let mut crc32 = 0;
+        for (idx, &byte) in self_buf.iter().enumerate() {
+            if CHECKSUM_OFFSET <= idx && idx < CHECKSUM_OFFSET + 4 {
+                crc::crc32(&mut crc32, 0);
+            } else {
+                crc::crc32(&mut crc32, byte);
+            }
+        }
+        crc32
+    }
+
+    fn validate_checksum(&self) -> Result<(), OggPageCheckError> {
+        let computed = self.checksum_helper();
+
+        let self_buf = self.as_u8_slice();
+        let crc_buf = &self_buf[CHECKSUM_OFFSET..CHECKSUM_OFFSET+4];
+        let in_page = LittleEndian::read_u32(crc_buf);
+
+        if computed == in_page {
+            Ok(())
+        } else {
+            Err(OggPageCheckError::BadCrc)
+        }
+    }
+
     fn recompute_checksum(&mut self) {
-        unimplemented!();
+        let crc32 = self.checksum_helper();
+        let self_buf = self.as_u8_slice_mut();
+        let crc_buf = &mut self_buf[CHECKSUM_OFFSET..CHECKSUM_OFFSET+4];
+        LittleEndian::write_u32(crc_buf, crc32);
     }
 
     pub fn begin<'a>(&'a mut self) -> ChecksumGuard<'a> {
@@ -416,14 +467,20 @@ pub struct ChecksumGuard<'a> {
 impl<'a> ChecksumGuard<'a> {
     pub fn set_position(&mut self, granule: u64) {
         let self_buf = self.page.as_u8_slice_mut();
-        let mut cur = Cursor::new(&mut self_buf[POSITION_OFFSET..POSITION_OFFSET+8]);
-        cur.write_u64::<LittleEndian>(granule).unwrap();
+        let pos_slice = &mut self_buf[POSITION_OFFSET..POSITION_OFFSET+8];
+        LittleEndian::write_u64(pos_slice, granule);
     }
 
     pub fn set_serial(&mut self, serial: u32) {
         let self_buf = self.page.as_u8_slice_mut();
-        let mut cur = Cursor::new(&mut self_buf[SERIAL_OFFSET..SERIAL_OFFSET+4]);
-        cur.write_u32::<LittleEndian>(serial).unwrap();
+        let ser_slice = &mut self_buf[SERIAL_OFFSET..SERIAL_OFFSET+4];
+        LittleEndian::write_u32(ser_slice, serial);
+    }
+
+    pub fn set_sequence(&mut self, sequence: u32) {
+        let self_buf = self.page.as_u8_slice_mut();
+        let seq_slice = &mut self_buf[SEQUENCE_OFFSET..SEQUENCE_OFFSET+4];
+        LittleEndian::write_u32(seq_slice, sequence);
     }
 }
 

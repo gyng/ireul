@@ -35,6 +35,7 @@ impl de::Visitor for EnqueueTrackRequestVisitor {
         match OggTrack::new(bytes) {
             Ok(val) => Ok(EnqueueTrackRequest { track: val.to_owned() }),
             Err(err) => {
+                println!("invalid ogg page: {:?}", err);
                 let msg = format!("invalid ogg page: {:?}", err);
                 Err(de::Error::syntax(&msg))
             }
@@ -47,6 +48,7 @@ impl de::Visitor for EnqueueTrackRequestVisitor {
         match OggTrackBuf::new(bytes) {
             Ok(val) => Ok(EnqueueTrackRequest { track: val }),
             Err(err) => {
+                println!("invalid ogg page: {:?}", err);
                 let msg = format!("invalid ogg page: {:?}", err);
                 Err(de::Error::syntax(&msg))
             }
@@ -63,9 +65,11 @@ impl Request for EnqueueTrackRequest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum EnqueueTrackError {
-    InvalidTrack,
+pub type EnqueueTrackResult = Result<(), EnqueueTrackError>;
 
-    BadSampleRate,
+#[derive(Serialize, Deserialize, Debug)]
+pub enum EnqueueTrackError {
+    InvalidTrack = 1,
+
+    BadSampleRate = 2,
 }

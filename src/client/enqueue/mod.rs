@@ -1,9 +1,20 @@
-use std::io::{self, Read, BufRead, Seek, SeekFrom};
+use std::io::{self, Read, Write, BufRead, Seek, SeekFrom};
 use std::fs::{self, File};
 use std::ffi::OsString;
+use std::net::TcpStream;
 
-use ogg::{OggPage, OggPageCheckError};
-use ogg_clock::OggClock;
+use bincode::serde as bincode;
+use byteorder::{self, ReadBytesExt, WriteBytesExt, BigEndian};
+
+use ogg::{OggTrackBuf, OggPageCheckError};
+use ireul_interface::proxy::{
+    SIZE_LIMIT,
+    RequestType,
+    EnqueueTrackRequest,
+    EnqueueTrackResult,
+    EnqueueTrackError,
+};
+
 use ::entrypoint::EntryPoint;
 use ::entrypoint::Error as EntryPointError;
 
@@ -11,6 +22,12 @@ pub static ENTRY_POINT: EntryPoint = EntryPoint {
     main: main,
     print_usage: print_usage,
 };
+
+impl From<byteorder::Error> for EntryPointError {
+    fn from(e: byteorder::Error) -> EntryPointError {
+        EntryPointError::Unspecified(format!("{}", e))
+    }
+}
 
 impl From<io::Error> for EntryPointError {
     fn from(e: io::Error) -> EntryPointError {
@@ -50,28 +67,45 @@ impl ProgramArgs {
 
 
 pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
-    let clock = OggClock::new(48000);
     let app_name = args[0].clone();
     let args = try!(ProgramArgs::new(args));
 
     let mut file = io::BufReader::new(try!(File::open(&args.target_file)));
     let mut buffer = Vec::new();
-    let _ = try!(file.read_to_end(&mut buffer));
+    try!(file.read_to_end(&mut buffer));
+    let track = OggTrackBuf::new(buffer).unwrap();
 
     let mut pages = 0;
-    let mut offset = 0;
     let mut samples = 0;
-
-    while offset < buffer.len() {
-        let page = try!(OggPage::new(&buffer[offset..]));
-        offset += page.as_u8_slice().len();
+    for page in track.pages() {
         pages += 1;
         samples = page.position();
-        clock.wait(&page);
     }
-    try!(file.seek(SeekFrom::Start(0)));
-    
-    println!("loaded ~~{} samples in {} pages", samples, pages);
+
+    println!("loaded {} samples in {} pages", samples, pages);
+
+    let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
+    try!(conn.write_u8(0));
+    try!(conn.write_u32::<BigEndian>(RequestType::EnqueueTrack.to_op_code()));
+
+    let req = EnqueueTrackRequest { track: track };
+    let buf = bincode::serialize(&req, SIZE_LIMIT).unwrap();
+    try!(conn.write_u32::<BigEndian>(buf.len() as u32));
+    try!(conn.write_all(&buf));
+
+    let mut resp_buf = Vec::new();
+    let resp_len = try!(conn.read_u32::<BigEndian>());
+    {
+        let mut limit_reader = Read::by_ref(&mut conn).take(resp_len as u64);
+        try!(limit_reader.read_to_end(&mut resp_buf));
+    }
+
+    let res: EnqueueTrackResult = bincode::deserialize(&resp_buf).unwrap();
+    println!("got response: {:?}", res);
+
+    try!(conn.write_u8(0));
+    try!(conn.write_u32::<BigEndian>(0));
+
     Ok(())
 }
 

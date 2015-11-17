@@ -1,0 +1,7 @@
+icecast_url = "http://localhost:8000/mountpoint.ogg"
+
+[metadata]
+name ="name"
+description = "description"
+url = "http://example.com"
+genre = "genre"

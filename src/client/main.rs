@@ -4,6 +4,9 @@
 extern crate ogg;
 extern crate ogg_clock;
 extern crate phf;
+extern crate bincode;
+extern crate ireul_interface;
+extern crate byteorder;
 
 use std::ffi::OsString;
 use std::env; // ::args_os;
