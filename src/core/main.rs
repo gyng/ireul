@@ -373,14 +373,6 @@ impl<'a> CoreBinder<'a> {
 
 /// Connects to IceCast and holds references to streamable content.
 struct OutputManager {
-    // TODO: this needs a helper to fix OggPage positions, so that the stream
-    //       starts with position of zero and strictly increases with time,
-    //       by the number of samples played.
-    //
-    // TODO: this needs a helper to fix OggPage sequences, so that the stream
-    //       starts with a sequence of zero and increases by one each time a
-    //       page is emitted.
-    //
     connector: IceCastWriter,
     cur_serial: u32,
     cur_sequence: u32,
@@ -429,15 +421,3 @@ impl OutputManager {
             page.sequence());
     }
 }
-
-// impl OutputManager {
-//     pub fn new(backup_track: OggTrack) -> OutputManager {
-//         OutputManager {
-//             connector: IceCastConnector,
-//             clock: OggClock::new(48000),
-//             play_queue: VecDeque::new(),
-//             offline_track: backup_track,
-//         }
-//     }
-// }
-
