@@ -17,13 +17,13 @@ use std::thread;
 use std::env;
 use std::sync::mpsc::{self};
 use std::net::{TcpStream, TcpListener};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::fs::File;
 
-use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 
-use ogg::{OggTrack, OggTrackBuf, OggPageBuf};
+use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
 use ogg_clock::OggClock;
 use ireul_interface::proxy::{
     SIZE_LIMIT,
@@ -32,8 +32,9 @@ use ireul_interface::proxy::{
     BinderError,
     EnqueueTrackRequest,
     EnqueueTrackError,
-    TrackSkipToEndRequest,
-    TrackSkipToEndError,
+    FastForward,
+    FastForwardRequest,
+    FastForwardError,
 };
 
 mod icecastwriter;
@@ -106,7 +107,7 @@ fn main() {
         connector: connector,
         cur_serial: 0,
         cur_sequence: 0,
-        position: 0,
+        // position: 0,
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
@@ -227,8 +228,9 @@ impl Core {
         Ok(())
     }
 
-    fn track_skip_to_end(&mut self, req: TrackSkipToEndRequest) -> Result<(), TrackSkipToEndError> {
-        unimplemented!();
+    fn fast_forward(&mut self, req: FastForwardRequest) -> Result<(), FastForwardError> {
+        try!(self.output.fast_forward(req.kind));
+        Ok(())
     }
 
     fn handle_command(&mut self, req_wr: RequestWrapper) {
@@ -251,8 +253,10 @@ fn client_worker(mut stream: TcpStream, chan: mpsc::SyncSender<RequestWrapper>) 
     const BUFFER_SIZE_LIMIT: usize = 20 * 1 << 20;
     loop {
         let version = try!(stream.read_u8());
+
         if version != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "invalid version"));
+            let err_msg = format!("invalid version: {}", version);
+            return Err(io::Error::new(io::ErrorKind::Other, err_msg));
         }
 
         let op_code = try!(stream.read_u32::<BigEndian>());
@@ -333,8 +337,8 @@ impl<'a> CoreBinder<'a> {
             RequestType::EnqueueTrack => {
                 self.enqueue_track(&req_buf)
             },
-            RequestType::TrackSkipToEnd => {
-                self.track_skip_to_end(&req_buf)
+            RequestType::FastForward => {
+                self.fast_forward(&req_buf)
             },
         };
         response_queue.send(response).unwrap();
@@ -342,34 +346,90 @@ impl<'a> CoreBinder<'a> {
 
     fn enqueue_track(&mut self, req: &[u8]) -> Vec<u8> {
         info!("CoreBinder::enqueue_track");
-        let res = bincode::serde::deserialize(req)
-            .map_err(|err| {
-                info!("serde error: {:?}", err);
-                BinderError::RemoteSerdeError
-            })
-            .and_then(|req| {
-                let req: Vec<u8> = req;
-                println!("req len = {:?}", req.len());
-                let req = EnqueueTrackRequest { track: OggTrackBuf::new(req).unwrap() };
-                self.core.enqueue_track(req)
-                   .map_err(BinderError::CallError)
-            });
+        let track_res: Result<(), EnqueueTrackError> =
+            OggTrack::new(req)
+                .map(|t| EnqueueTrackRequest { track: t.to_owned() })
+                .map_err(|_| EnqueueTrackError::InvalidTrack)
+                .and_then(|req| self.core.enqueue_track(req));
 
-        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
+        let mut buf = io::Cursor::new(Vec::new());
+        match track_res {
+            Ok(()) => {
+                buf.write_u8(0).unwrap();
+            },
+            Err(err) => {
+                buf.write_u8(1).unwrap();
+                // error kind
+                buf.write_u32::<BigEndian>(err as u32).unwrap();
+                // future expansion: error message
+                buf.write_u32::<BigEndian>(0).unwrap();
+            }
+        }
+        buf.into_inner()
     }
 
-    fn track_skip_to_end(&mut self, req: &[u8]) -> Vec<u8> {
-        warn!("unimplemented: client request TrackSkipToEndRequest");
-         let res: Result<(), BinderError<TrackSkipToEndError>> =
-            bincode::serde::deserialize::<TrackSkipToEndRequest>(req)
-                .map_err(|_| BinderError::RemoteSerdeError)
-                .and_then(|req| {
-                    Err(BinderError::StubImplementation)
-                });
+    fn fast_forward(&mut self, req: &[u8]) -> Vec<u8> {
+        info!("CoreBinder::fast_forward");
+        if req.len() < 4 {
+            // should be an error condition... ProtocolError.
+            // we need to disconnect the client in this case, usually.
+            return Vec::new();
+        }
 
-        bincode::serde::serialize(&res, SIZE_LIMIT).unwrap()
+        let ff_type = BigEndian::read_u32(req);
+        let req: FastForwardRequest =
+            FastForward::from_u32(ff_type)
+                .map(|ff| FastForwardRequest { kind: ff })
+                .unwrap();
+
+        let mut buf = io::Cursor::new(Vec::new());
+        info!("core.fast_forward({:?})", req);
+        match self.core.fast_forward(req) {
+            Ok(()) => {
+                info!("FF OK");
+                buf.write_u8(0).unwrap();
+            },
+            Err(err) => {
+                info!("FF Error");
+                buf.write_u8(1).unwrap();
+                // error kind
+                buf.write_u32::<BigEndian>(0).unwrap();
+                // future expansion: error message
+                buf.write_u32::<BigEndian>(0).unwrap();
+            }
+        };
+        buf.into_inner()
     }
 }
+
+// #[derive(PartialEq, Eq, Hash)]
+// struct QueueHandle(pub u64);
+
+// struct QueueStatus {
+//     id: String,
+//     handle: QueueHandle,
+// }
+
+// struct QueueTrack {
+//     id: String,
+//     data: OggTrackBuf,
+// }
+
+// struct PlayQueue {
+//     queue: VecDeque<QueueHandle>,
+//     tracks: HashMap<QueueHandle, QueueTrack>,
+//     offline_track: OggTrackBuf,
+// }
+
+// impl PlayQueue {
+//     pub fn status(&self) -> Vec<QueueStatus> {
+//         //
+//     }
+
+//     pub fn push_back(&mut self) -> QueueHandle {
+//         //
+//     }
+// }
 
 /// Connects to IceCast and holds references to streamable content.
 struct OutputManager {
@@ -378,10 +438,15 @@ struct OutputManager {
     cur_sequence: u32,
     clock: OggClock,
 
-    // the position at the end of the currently playing track
-    position: u64,
+
+    // prev_position: u64,
+    // // the latest position in the current track
+    // current_track_pos: u64,
+    // // the position at the end of the currently playing track
 
     playing_offline: bool,
+
+
     buffer: VecDeque<OggPageBuf>,
     play_queue: VecDeque<OggTrackBuf>,
     offline_track: OggTrackBuf,
@@ -390,16 +455,21 @@ struct OutputManager {
 impl OutputManager {
     fn fill_buffer(&mut self) {
         let mut track = match self.play_queue.pop_front() {
-            Some(track) => track,
-            None => self.offline_track.clone(),
+            Some(track) => {
+                self.playing_offline = false;
+                track
+            },
+            None => {
+                self.playing_offline = true;
+                self.offline_track.clone()
+            }
         };
 
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
         update_sequence(&mut self.cur_sequence, track.as_mut());
         self.cur_serial = self.cur_serial.wrapping_add(0);
-        // update_positions(self.position, track.as_mut());
-        self.position = final_position(&track).unwrap();
+
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
 
@@ -408,6 +478,27 @@ impl OutputManager {
             self.fill_buffer();
         }
         self.buffer.pop_front().unwrap()
+    }
+
+    fn fast_forward_track_boundary(&mut self) -> Result<(), FastForwardError> {
+        loop {
+            let page = self.get_next_page();
+            debug!("checking page...");
+            if page_starts_track(page.as_ref()) {
+                debug!("checking page... found a start");
+                self.buffer.push_front(page);
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn fast_forward(&mut self, kind: FastForward) -> Result<(), FastForwardError> {
+        match kind {
+            FastForward::TrackBoundary => {
+                self.fast_forward_track_boundary()
+            }
+        }
     }
 
     fn copy_page(&mut self) {
@@ -420,4 +511,8 @@ impl OutputManager {
             page.serial(),
             page.sequence());
     }
+}
+
+fn page_starts_track(page: &OggPage) -> bool {
+    page.body().starts_with(b"\x01vorbis")
 }

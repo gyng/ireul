@@ -73,3 +73,13 @@ pub enum EnqueueTrackError {
 
     BadSampleRate = 2,
 }
+
+impl EnqueueTrackError {
+    pub fn from_u32(val: u32) -> Option<EnqueueTrackError> {
+        match val {
+            1 => Some(EnqueueTrackError::InvalidTrack),
+            2 => Some(EnqueueTrackError::BadSampleRate),
+            _ => None
+        }
+    }
+}

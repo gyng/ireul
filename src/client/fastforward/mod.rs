@@ -10,9 +10,9 @@ use ogg::{OggTrackBuf, OggPageCheckError};
 use ireul_interface::proxy::{
     SIZE_LIMIT,
     RequestType,
-    EnqueueTrackRequest,
-    EnqueueTrackResult,
-    EnqueueTrackError,
+    FastForwardRequest,
+    FastForwardResult,
+    FastForwardError,
 };
 
 use ::entrypoint::EntryPoint;
@@ -23,25 +23,22 @@ pub static ENTRY_POINT: EntryPoint = EntryPoint {
     print_usage: print_usage,
 };
 
+
 #[derive(Debug)]
 struct ProgramArgs {
     app_name: OsString,
-    target_file: OsString,
 }
 
 impl ProgramArgs {
     pub fn new(args: Vec<OsString>) -> Result<ProgramArgs, EntryPointError> {
-        if args.len() < 3 {
+        if args.len() < 2 {
             return Err(EntryPointError::InvalidArguments);
         }
 
         let app_name = args[0].clone();
-        assert_eq!(&args[1], "enqueue");
-        let target_file = args[2].clone();
-
+        assert_eq!(&args[1], "fast-forward");
         Ok(ProgramArgs {
             app_name: app_name,
-            target_file: target_file,
         })
     }
 }
@@ -51,28 +48,13 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     let app_name = args[0].clone();
     let args = try!(ProgramArgs::new(args));
 
-    let mut file = io::BufReader::new(try!(File::open(&args.target_file)));
-    let mut buffer = Vec::new();
-    try!(file.read_to_end(&mut buffer));
-    let track = OggTrackBuf::new(buffer).unwrap();
-
-    let mut pages = 0;
-    let mut samples = 0;
-    for page in track.pages() {
-        pages += 1;
-        samples = page.position();
-    }
-
-    println!("loaded {} samples in {} pages", samples, pages);
-
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
     try!(conn.write_u8(0));
-    try!(conn.write_u32::<BigEndian>(RequestType::EnqueueTrack.to_op_code()));
-    let slice = track.as_u8_slice();
-    try!(conn.write_u32::<BigEndian>(slice.len() as u32));
-    try!(conn.write_all(&slice));
+    try!(conn.write_u32::<BigEndian>(RequestType::FastForward.to_op_code()));
+    try!(conn.write_u32::<BigEndian>(4));
+    try!(conn.write_u32::<BigEndian>(0));
 
-    let res: EnqueueTrackResult = match try!(conn.read_u8()) {
+    let res: FastForwardResult = match try!(conn.read_u8()) {
         0 => Ok(()),
         _ => {
             let errno = try!(conn.read_u32::<BigEndian>());
@@ -82,20 +64,19 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
                 let mut limit_reader = Read::by_ref(&mut conn).take(errstr_len as u64);
                 try!(limit_reader.read_to_string(&mut errstr));
             }
-            Err(EnqueueTrackError::from_u32(errno).unwrap())
+            Err(FastForwardError)
+            // Err(FastForwardError::from_u32(errno).unwrap())
         }
     };
     println!("got response: {:?}", res);
-
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(0));
-
     Ok(())
 }
 
 pub fn print_usage(args: &[OsString]) {
-    println!("{} enqueue <ogg-file>", args[0].clone().into_string().ok().unwrap());
+    println!("{} fast-forward", args[0].clone().into_string().ok().unwrap());
     println!("");
-    println!("    Validates and enqueues the target file");
+    println!("    Skips the currently-playing track");
     println!("");
 }
