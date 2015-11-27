@@ -1,4 +1,4 @@
-icecast_url = "http://localhost:8000/mountpoint.ogg"
+icecast_url = "http://source:hackme@localhost:8000/mountpoint.ogg"
 
 [metadata]
 name ="name"
