@@ -65,13 +65,15 @@ impl Request for EnqueueTrackRequest {
     }
 }
 
-pub type EnqueueTrackResult = Result<(), EnqueueTrackError>;
+pub type EnqueueTrackResult = Result<u64, EnqueueTrackError>;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum EnqueueTrackError {
     InvalidTrack = 1,
 
     BadSampleRate = 2,
+
+    Full = 3,
 }
 
 impl EnqueueTrackError {
@@ -79,6 +81,7 @@ impl EnqueueTrackError {
         match val {
             1 => Some(EnqueueTrackError::InvalidTrack),
             2 => Some(EnqueueTrackError::BadSampleRate),
+            3 => Some(EnqueueTrackError::Full),
             _ => None
         }
     }

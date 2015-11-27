@@ -72,14 +72,26 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     try!(conn.write_u32::<BigEndian>(slice.len() as u32));
     try!(conn.write_all(&slice));
 
-    let res: EnqueueTrackResult = match try!(conn.read_u8()) {
-        0 => Ok(()),
+    let frame_length = try!(conn.read_u32::<BigEndian>());
+    let mut resp_buf = Vec::new();
+    {
+        let mut limit_reader = Read::by_ref(&mut conn).take(frame_length as u64);
+        try!(limit_reader.read_to_end(&mut resp_buf));
+    }
+
+    let mut frame = io::Cursor::new(&resp_buf);
+    let res: EnqueueTrackResult = match try!(frame.read_u8()) {
+        0 => {
+            let handle = try!(frame.read_u64::<BigEndian>());
+            println!("got handle {:#x}", handle);
+            Ok(handle)
+        },
         _ => {
-            let errno = try!(conn.read_u32::<BigEndian>());
-            let errstr_len = try!(conn.read_u32::<BigEndian>());
+            let errno = try!(frame.read_u32::<BigEndian>());
+            let errstr_len = try!(frame.read_u32::<BigEndian>());
             let mut errstr = String::new();
             {
-                let mut limit_reader = Read::by_ref(&mut conn).take(errstr_len as u64);
+                let mut limit_reader = Read::by_ref(&mut frame).take(errstr_len as u64);
                 try!(limit_reader.read_to_string(&mut errstr));
             }
             Err(EnqueueTrackError::from_u32(errno).unwrap())

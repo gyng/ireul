@@ -148,6 +148,26 @@ module Ireul
     }
   end
 
+  class Handle
+    def self.from_frame(buffer)
+      value_buf = buffer.read(8)
+
+      handle = Handle::allocate()
+      handle.instance_eval {
+        @value = value_buf.unpack('Q>')[0]
+      }
+      handle
+    end
+
+    def to_s()
+      "Handle(#{@value.to_s(16)})"
+    end
+
+    def inspect()
+      "Handle(#{@value})"
+    end
+  end
+
   module EnqueueTrackError
     include Enum
 
@@ -163,9 +183,16 @@ module Ireul
       attr_reader :message
     end
 
+    class Full < StandardError
+      VARIANT_ID = 3
+
+      attr_reader :message
+    end
+
     VARIANTS = [
       InvalidTrack,
       BadSampleRate,
+      Full,
     ]
 
     def self.from_frame(buffer)
@@ -266,7 +293,7 @@ module Ireul
   end
 
   class Core
-    ENQUEUE_RESPONSE_TYPE = Result::create_type(Unit, EnqueueTrackError)
+    ENQUEUE_RESPONSE_TYPE = Result::create_type(Handle, EnqueueTrackError)
     FAST_FORWARD_RESPONSE_TYPE = Result::create_type(Unit, FastForwardError)
 
     def initialize(socket)
@@ -274,10 +301,10 @@ module Ireul
     end
 
     # Accepts an ogg file in the form of a string
-    def enqueue(track)
-      self.send_frame(RequestType::EnqueueTrack, track)
+    def enqueue(track) # -> Handle
+      send_frame(RequestType::EnqueueTrack, track)
 
-      rx_frame = self.recv_frame()
+      rx_frame = recv_frame()
       frame = StringIO::new(rx_frame)
       result = self.class::ENQUEUE_RESPONSE_TYPE.from_frame(frame)
 
@@ -298,9 +325,9 @@ module Ireul
       end
 
       message_buffer = [fast_forward.to_int()].pack('N')
-      self.send_frame(RequestType::FastForward, message_buffer)
+      send_frame(RequestType::FastForward, message_buffer)
 
-      rx_frame = self.recv_frame()
+      rx_frame = recv_frame()
       frame = StringIO::new(rx_frame)
       result = self.class::FAST_FORWARD_RESPONSE_TYPE.from_frame(frame)
 

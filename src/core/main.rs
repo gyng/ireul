@@ -12,9 +12,12 @@ extern crate env_logger;
 extern crate byteorder;
 extern crate url;
 extern crate toml;
+extern crate rand;
 
 use std::thread;
 use std::env;
+use std::fmt;
+use std::collections::HashSet;
 use std::sync::mpsc::{self};
 use std::net::{TcpStream, TcpListener};
 use std::collections::{HashMap, VecDeque};
@@ -37,8 +40,10 @@ use ireul_interface::proxy::{
     FastForwardError,
 };
 
+mod queue;
 mod icecastwriter;
 
+use queue::{PlayQueue, Handle, PlayQueueError};
 use icecastwriter::{
     IceCastWriter,
     IceCastWriterOptions,
@@ -103,6 +108,8 @@ fn main() {
     file.read_to_end(&mut buffer).unwrap();
     let offline_track = OggTrackBuf::new(buffer).unwrap();
 
+    let play_queue = PlayQueue::new(50);
+
     let output_manager = OutputManager {
         connector: connector,
         cur_serial: 0,
@@ -111,7 +118,7 @@ fn main() {
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
-        play_queue: VecDeque::new(),
+        play_queue: PlayQueue::new(10),
         offline_track: offline_track,
     };
 
@@ -158,15 +165,6 @@ fn update_serial(serial: u32, track: &mut OggTrack) {
     }
 }
 
-fn update_sequence(sequence: &mut u32, track: &mut OggTrack) {
-    // FIXME: using this as-is segfaults icecast.
-    //
-    // for page in track.pages_mut() {
-    //     page.set_sequence(*sequence);
-    //     *sequence = sequence.wrapping_add(1);
-    // }
-}
-
 fn update_positions(start_pos: u64, track: &mut OggTrack) {
     for page in track.pages_mut() {
         let old_pos = page.position();
@@ -202,7 +200,7 @@ impl Core {
         })
     }
 
-    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<(), EnqueueTrackError> {
+    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<Handle, EnqueueTrackError> {
         let EnqueueTrackRequest { mut track } = req;
         {
             let mut pages = 0;
@@ -224,8 +222,10 @@ impl Core {
         try!(check_sample_rate(self.output.clock.sample_rate(), &track)
             .map_err(|()| EnqueueTrackError::BadSampleRate));
 
-        self.output.play_queue.push_back(track);
-        Ok(())
+        self.output.play_queue.add_track(track.as_ref())
+            .map_err(|err| match err {
+                PlayQueueError::Full => EnqueueTrackError::Full,
+            })
     }
 
     fn fast_forward(&mut self, req: FastForwardRequest) -> Result<(), FastForwardError> {
@@ -346,7 +346,7 @@ impl<'a> CoreBinder<'a> {
 
     fn enqueue_track(&mut self, req: &[u8]) -> Vec<u8> {
         info!("CoreBinder::enqueue_track");
-        let track_res: Result<(), EnqueueTrackError> =
+        let track_res: Result<Handle, EnqueueTrackError> =
             OggTrack::new(req)
                 .map(|t| EnqueueTrackRequest { track: t.to_owned() })
                 .map_err(|_| EnqueueTrackError::InvalidTrack)
@@ -354,8 +354,9 @@ impl<'a> CoreBinder<'a> {
 
         let mut buf = io::Cursor::new(Vec::new());
         match track_res {
-            Ok(()) => {
+            Ok(Handle(handle_id)) => {
                 buf.write_u8(0).unwrap();
+                buf.write_u64::<BigEndian>(handle_id).unwrap();
             },
             Err(err) => {
                 buf.write_u8(1).unwrap();
@@ -386,11 +387,9 @@ impl<'a> CoreBinder<'a> {
         info!("core.fast_forward({:?})", req);
         match self.core.fast_forward(req) {
             Ok(()) => {
-                info!("FF OK");
                 buf.write_u8(0).unwrap();
             },
             Err(err) => {
-                info!("FF Error");
                 buf.write_u8(1).unwrap();
                 // error kind
                 buf.write_u32::<BigEndian>(0).unwrap();
@@ -402,35 +401,6 @@ impl<'a> CoreBinder<'a> {
     }
 }
 
-// #[derive(PartialEq, Eq, Hash)]
-// struct QueueHandle(pub u64);
-
-// struct QueueStatus {
-//     id: String,
-//     handle: QueueHandle,
-// }
-
-// struct QueueTrack {
-//     id: String,
-//     data: OggTrackBuf,
-// }
-
-// struct PlayQueue {
-//     queue: VecDeque<QueueHandle>,
-//     tracks: HashMap<QueueHandle, QueueTrack>,
-//     offline_track: OggTrackBuf,
-// }
-
-// impl PlayQueue {
-//     pub fn status(&self) -> Vec<QueueStatus> {
-//         //
-//     }
-
-//     pub fn push_back(&mut self) -> QueueHandle {
-//         //
-//     }
-// }
-
 /// Connects to IceCast and holds references to streamable content.
 struct OutputManager {
     connector: IceCastWriter,
@@ -438,23 +408,15 @@ struct OutputManager {
     cur_sequence: u32,
     clock: OggClock,
 
-
-    // prev_position: u64,
-    // // the latest position in the current track
-    // current_track_pos: u64,
-    // // the position at the end of the currently playing track
-
     playing_offline: bool,
-
-
     buffer: VecDeque<OggPageBuf>,
-    play_queue: VecDeque<OggTrackBuf>,
+    play_queue: PlayQueue,
     offline_track: OggTrackBuf,
 }
 
 impl OutputManager {
     fn fill_buffer(&mut self) {
-        let mut track = match self.play_queue.pop_front() {
+        let mut track = match self.play_queue.pop_track() {
             Some(track) => {
                 self.playing_offline = false;
                 track
@@ -467,7 +429,6 @@ impl OutputManager {
 
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
-        update_sequence(&mut self.cur_sequence, track.as_mut());
         self.cur_serial = self.cur_serial.wrapping_add(0);
 
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
