@@ -11,6 +11,7 @@ use std::borrow::Cow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use byteorder::Error as ByteOrderError;
 
+mod reader;
 mod slice;
 mod vorbis;
 mod crc;

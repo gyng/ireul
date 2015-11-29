@@ -2,17 +2,38 @@ extern crate byteorder;
 
 use std::mem;
 use std::ops;
+use std::str;
+use std::convert;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
 use std::io::{BufReader};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 
+use ::reader;
+use ::reader::Reader;
 use ::slice::Slice;
 
 #[derive(Debug)]
 pub enum VorbisHeaderCheckError {
     BadCapture,
+    Invalid(&'static str),
     BadIdentificationHeader,
     BadIdentificationHeaderLength,
+}
+
+impl convert::From<str::Utf8Error> for VorbisHeaderCheckError {
+    fn from(_e: str::Utf8Error) -> VorbisHeaderCheckError {
+        VorbisHeaderCheckError::Invalid("invalid utf8 in comment header")
+    }
+}
+
+impl convert::From<reader::Error> for VorbisHeaderCheckError {
+    fn from(e: reader::Error) -> VorbisHeaderCheckError {
+        match e {
+            reader::Error::Truncated => {
+                VorbisHeaderCheckError::Invalid("truncated comment header")
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -111,8 +132,12 @@ impl VorbisHeader {
             None => {
                 return Err(VorbisHeaderCheckError::BadCapture);
             },
+
             Some(VorbisHeaderType::IdentificationHeader) => {
                 try!(VorbisHeader::parse_identification_header(buf));
+            },
+            Some(VorbisHeaderType::CommentHeader) => {
+                try!(VorbisHeader::parse_comment_header(buf));
             },
             _ => ()
         }
@@ -120,10 +145,33 @@ impl VorbisHeader {
         Ok(())
     }
 
-    // pub fn from_page(page: &OggPage) -> Result<VorbisHeader, VorbisHeaderCheckError> {
-    //     // page.packets(packets)
-    //     unimplemented!();
-    // }
+    pub fn identification_header(&self) -> Option<IdentificationHeader> {
+        let buf = self.as_u8_slice();
+
+        // We know the header is well-formed, so it must have a valid VorbisHeaderType
+        match VorbisHeaderType::from_u8(buf[0]).unwrap() {
+            VorbisHeaderType::IdentificationHeader => {
+                let id_header = VorbisHeader::parse_identification_header(buf)
+                    .expect("identification header parse error: this shouldn't happen");
+                Some(id_header)
+            },
+            _ => None
+        }
+    }
+
+    pub fn comments(&self) -> Option<Comments> {
+        let buf = self.as_u8_slice();
+
+        // We know the header is well-formed, so it must have a valid VorbisHeaderType
+        match VorbisHeaderType::from_u8(buf[0]).unwrap() {
+            VorbisHeaderType::CommentHeader => {
+                let id_header = VorbisHeader::parse_comment_header(buf)
+                    .expect("identification header parse error: this shouldn't happen");
+                Some(id_header)
+            },
+            _ => None
+        }
+    }
 
     fn parse_identification_header(buf: &[u8]) -> Result<IdentificationHeader, VorbisHeaderCheckError> {
         // Must only be called on IdentificationHeader packets.
@@ -172,18 +220,34 @@ impl VorbisHeader {
         })
     }
 
-    pub fn identification_header(&self) -> Option<IdentificationHeader> {
-        let buf = self.as_u8_slice();
 
-        // We know the header is well-formed, so it must have a valid VorbisHeaderType
-        match VorbisHeaderType::from_u8(buf[0]).unwrap() {
-            VorbisHeaderType::IdentificationHeader => {
-                let id_header = VorbisHeader::parse_identification_header(buf)
-                    .expect("identification header parse error: this shouldn't happen");
-                Some(id_header)
-            },
-            _ => None
+    fn parse_comment_header(buf: &[u8]) -> Result<Comments, VorbisHeaderCheckError> {
+        let mut reader = Reader::<LittleEndian>::new(buf);
+        assert_eq!(reader.read_buffer(7).ok().unwrap(), b"\x03vorbis");
+
+        let vendor_len = try!(reader.read_u32());
+        let vendor_buf = try!(reader.read_buffer(vendor_len as usize));
+        let vendor = try!(str::from_utf8(vendor_buf)).to_string();
+
+        let comment_count = try!(reader.read_u32());
+        let mut comments = Vec::new();
+
+        for _ in 0..comment_count {
+            let comment_len = try!(reader.read_u32());
+            let comment_buf = try!(reader.read_buffer(comment_len as usize));
+            let comment_str = try!(str::from_utf8(comment_buf));
+            let (key, val) = try!(split_comment(comment_str));
+            comments.push((key.to_string(), val.to_string()));
         }
+
+        if (try!(reader.read_u8()) & 1) != 1 {
+            return Err(VorbisHeaderCheckError::Invalid("framing bit unset"))
+        }
+
+        Ok(Comments {
+            vendor: vendor,
+            comments: comments,
+        })
     }
 }
 
@@ -197,6 +261,22 @@ struct IdentificationHeader {
     blocksize_0: u8,
     blocksize_1: u8,
 }
+
+struct Comments {
+    vendor: String,
+    comments: Vec<(String, String)>
+}
+
+fn split_comment(buffer: &str) -> Result<(&str, &str), VorbisHeaderCheckError>{
+    match buffer.find("=") {
+        Some(idx) => {
+            // TODO: validate key: 0x20 through 0x7D excluding 0x3D
+            Ok((&buffer[..idx], &buffer[idx+1..]))
+        }
+        None => Err(VorbisHeaderCheckError::Invalid("Invalid comment")),
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -248,5 +328,101 @@ mod test {
         let malformed_header_buf = [0x01, 0x76, 0x6f, 0x72, 0x62, 0x69, 0x73];
         let malformed_test_header = VorbisHeader::new(&malformed_header_buf);
         assert!(malformed_test_header.is_err());
+    }
+
+    static COMMENT_HEADER_VALID: &'static [u8] = &[
+        0x03, b'v', b'o', b'r', b'b', b'i', b's',
+
+        0x04, 0x00, 0x00, 0x00,  // vendor length = 4
+        b't', b'e', b's', b't',
+
+        0x02, 0x00, 0x00, 0x00,  // comment count
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'A', b'=', b'a', b'a',
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'B', b'=', b'b', b'b',
+
+        0x01 // unset framing bit
+    ];
+
+    static COMMENT_HEADER_UNSET_FRAMING_BIT: &'static [u8] = &[
+        0x03, b'v', b'o', b'r', b'b', b'i', b's',
+
+        0x04, 0x00, 0x00, 0x00,  // vendor length = 4
+        b't', b'e', b's', b't',
+
+        0x02, 0x00, 0x00, 0x00,  // comment count
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'A', b'=', b'a', b'a',
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'B', b'=', b'b', b'b',
+
+        0x00 // unset framing bit
+    ];
+
+    static COMMENT_HEADER_FRAMING_BIT_TRUNCATED: &'static [u8] = &[
+        0x03, b'v', b'o', b'r', b'b', b'i', b's',
+
+        0x04, 0x00, 0x00, 0x00,  // vendor length = 4
+        b't', b'e', b's', b't',
+
+        0x02, 0x00, 0x00, 0x00,  // comment count
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'A', b'=', b'a', b'a',
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'B', b'=', b'b', b'b',
+
+        // truncated: missing framing bit
+    ];
+
+    static COMMENT_HEADER_TRUNCATED_MID_COMMENT: &'static [u8] = &[
+        0x03, b'v', b'o', b'r', b'b', b'i', b's',
+
+        0x04, 0x00, 0x00, 0x00,  // vendor length = 4
+        b't', b'e', b's', b't',
+
+        0x02, 0x00, 0x00, 0x00,  // comment count
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'A', b'=', b'a', b'a',
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'B', b'=',
+
+        // truncated: the second comment should have continued, but didn't.
+    ];
+
+    static COMMENT_HEADER_TRUNCATED_COMMENTS: &'static [u8] = &[
+        0x03, b'v', b'o', b'r', b'b', b'i', b's',
+
+        0x04, 0x00, 0x00, 0x00,  // vendor length = 4
+        b't', b'e', b's', b't',
+
+        0x02, 0x00, 0x00, 0x00,  // comment count
+        0x04, 0x00, 0x00, 0x00,  // comment length = 4
+        b'A', b'=', b'a', b'a',
+
+        // truncated: we should have a comment here, but we don't.
+    ];
+
+    fn test_parse_comment_header_valid() {
+        let test_header = VorbisHeader::new(COMMENT_HEADER_VALID).unwrap();
+        let comments = test_header.comments().unwrap();
+        assert_eq!(comments.vendor, "test");
+        assert_eq!(comments.comments.len(), 2);
+    }
+
+    fn test_parse_malformed_comment_header_unset_framing_bit() {
+        VorbisHeader::new(COMMENT_HEADER_UNSET_FRAMING_BIT).err().unwrap();
+    }
+
+    fn test_parse_malformed_comment_header_framing_bit_truncated() {
+        VorbisHeader::new(COMMENT_HEADER_FRAMING_BIT_TRUNCATED).err().unwrap();
+    }
+
+    fn test_parse_malformed_comment_header_truncated_mid_comment() {
+        VorbisHeader::new(COMMENT_HEADER_TRUNCATED_MID_COMMENT).err().unwrap();
+    }
+
+    fn test_parse_malformed_comment_header_truncated_comments() {
+        VorbisHeader::new(COMMENT_HEADER_TRUNCATED_COMMENTS).err().unwrap();
     }
 }
