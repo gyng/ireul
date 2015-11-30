@@ -222,10 +222,16 @@ impl Core {
         try!(check_sample_rate(self.output.clock.sample_rate(), &track)
             .map_err(|()| EnqueueTrackError::BadSampleRate));
 
-        self.output.play_queue.add_track(track.as_ref())
+        let handle = self.output.play_queue.add_track(track.as_ref())
             .map_err(|err| match err {
                 PlayQueueError::Full => EnqueueTrackError::Full,
-            })
+            });
+
+        if self.output.playing_offline {
+            self.output.fast_forward_track_boundary();
+        }
+
+        handle
     }
 
     fn fast_forward(&mut self, req: FastForwardRequest) -> Result<(), FastForwardError> {
