@@ -24,6 +24,7 @@ use std::fs::File;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 
 use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
+use ogg::vorbis::VorbisHeader;
 use ogg_clock::OggClock;
 use ireul_interface::proxy::{
     RequestWrapper,
@@ -151,9 +152,18 @@ fn validate_positions(track: &OggTrack) -> Result<(), ()> {
 }
 
 fn check_sample_rate(req: u32, track: &OggTrack) -> Result<(), ()> {
-    warn!("check_sample_rate: STUB");
-    Ok(())
+    let packet = try!(VorbisHeader::find_identification(track.pages()));
+
+    // find_identification will always find a packet with an identification_header
+    let id_header = packet.identification_header().unwrap();
+
+    if id_header.audio_sample_rate == req {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
+
 
 fn update_serial(serial: u32, track: &mut OggTrack) {
     for page in track.pages_mut() {

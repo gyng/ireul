@@ -124,6 +124,21 @@ impl VorbisHeader {
         unsafe { mem::transmute(self) }
     }
 
+    pub fn find_identification<'a, I>(iter: I) -> Result<&'a VorbisHeader, ()>
+        where I: Iterator<Item=&'a OggPage>
+    {
+        for page in iter {
+            for packet in page.raw_packets() {
+                if let Ok(vpkt) = VorbisHeader::new(packet) {
+                    if vpkt.identification_header().is_some() {
+                        return Ok(vpkt);
+                    }
+                }
+            }
+        }
+        Err(())
+    }
+
     pub fn find_comments<'a, I>(iter: I) -> Result<&'a VorbisHeader, ()>
         where I: Iterator<Item=&'a OggPage>
     {
@@ -133,10 +148,6 @@ impl VorbisHeader {
                     if vpkt.comments().is_some() {
                         return Ok(vpkt);
                     }
-                    match vpkt.comments() {
-                        Some(comments) => return Ok(vpkt),
-                        None => (),
-                    };
                 }
            }
         }
@@ -271,15 +282,16 @@ impl VorbisHeader {
     }
 }
 
+#[derive(Debug)]
 pub struct IdentificationHeader {
-    vorbis_version: u32,
-    audio_channels: u8,
-    audio_sample_rate: u32,
-    bitrate_maximum: u32,
-    bitrate_nominal: u32,
-    bitrate_minimum: u32,
-    blocksize_0: u8,
-    blocksize_1: u8,
+    pub vorbis_version: u32,
+    pub audio_channels: u8,
+    pub audio_sample_rate: u32,
+    pub bitrate_maximum: u32,
+    pub bitrate_nominal: u32,
+    pub bitrate_minimum: u32,
+    pub blocksize_0: u8,
+    pub blocksize_1: u8,
 }
 
 pub struct Comments {
