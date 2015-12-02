@@ -1,7 +1,7 @@
 language: rust
 sudo: false
 rust:
- - nightly-2015-11-13
+ - nightly-2015-11-30
 script:
 - (cd ogg && cargo test --verbose)
 - (cd ogg_clock && cargo test --verbose)
