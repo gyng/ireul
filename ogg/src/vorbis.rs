@@ -275,7 +275,7 @@ impl VorbisHeader {
     }
 }
 
-struct IdentificationHeader {
+pub struct IdentificationHeader {
     vorbis_version: u32,
     audio_channels: u8,
     audio_sample_rate: u32,
@@ -286,9 +286,9 @@ struct IdentificationHeader {
     blocksize_1: u8,
 }
 
-struct Comments {
-    vendor: String,
-    comments: Vec<(String, String)>
+pub struct Comments {
+    pub vendor: String,
+    pub comments: Vec<(String, String)>
 }
 
 

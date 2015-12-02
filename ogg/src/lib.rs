@@ -13,7 +13,7 @@ use byteorder::Error as ByteOrderError;
 
 mod reader;
 mod slice;
-mod vorbis;
+pub mod vorbis;
 mod crc;
 
 use slice::Slice;
