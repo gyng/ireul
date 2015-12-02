@@ -11,6 +11,7 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 use ::reader;
 use ::reader::Reader;
 use ::slice::Slice;
+use {OggPage};
 
 #[derive(Debug)]
 pub enum VorbisHeaderCheckError {
@@ -121,6 +122,29 @@ impl VorbisHeader {
 
     fn as_u8_slice_mut(&mut self) -> &mut [u8] {
         unsafe { mem::transmute(self) }
+    }
+
+    pub fn find_comments<'a, I>(iter: I) -> Result<&'a VorbisHeader, ()>
+        where I: Iterator<Item=&'a OggPage>
+    {
+        for page in iter {
+            println!("found a page: {:?}", page.as_u8_slice());
+            for packet in page.raw_packets() {
+                println!("found a packet: {:?}", packet);
+            }
+            for packet in page.raw_packets() {
+                if let Ok(vpkt) = VorbisHeader::new(packet) {
+                    if vpkt.comments().is_some() {
+                        return Ok(vpkt);
+                    }
+                    match vpkt.comments() {
+                        Some(comments) => return Ok(vpkt),
+                        None => (),
+                    };
+                }
+           }
+        }
+        Err(())
     }
 
     pub fn check(buf: &[u8]) -> Result<(), VorbisHeaderCheckError> {
@@ -267,6 +291,7 @@ struct Comments {
     comments: Vec<(String, String)>
 }
 
+
 fn split_comment(buffer: &str) -> Result<(&str, &str), VorbisHeaderCheckError>{
     match buffer.find("=") {
         Some(idx) => {
@@ -280,6 +305,7 @@ fn split_comment(buffer: &str) -> Result<(&str, &str), VorbisHeaderCheckError>{
 
 #[cfg(test)]
 mod test {
+    use {OggTrack};
     use super::VorbisHeader;
 
     #[test]
@@ -329,6 +355,8 @@ mod test {
         let malformed_test_header = VorbisHeader::new(&malformed_header_buf);
         assert!(malformed_test_header.is_err());
     }
+
+    static SAMPLE_OGG: &'static [u8] = include_bytes!("../testdata/Hydrate-Kenny_Beltrey.ogg");
 
     static COMMENT_HEADER_VALID: &'static [u8] = &[
         0x03, b'v', b'o', b'r', b'b', b'i', b's',
@@ -403,6 +431,31 @@ mod test {
         // truncated: we should have a comment here, but we don't.
     ];
 
+    fn comments_helper(items: &[(&str, &str)]) -> Vec<(String, String)> {
+        items
+            .into_iter()
+            .map(|&(k,v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_comment_from_ogg() {
+        let track = OggTrack::new(SAMPLE_OGG).unwrap();
+        let comment_header = VorbisHeader::find_comments(track.pages()).unwrap();
+
+        let comments = comment_header.comments().unwrap();
+        assert_eq!(comments.vendor, "Xiph.Org libVorbis I 20020713");
+        assert_eq!(comments.comments, comments_helper(&[
+            ("TITLE", "Hydrate - Kenny Beltrey"),
+            ("ARTIST", "Kenny Beltrey"),
+            ("ALBUM", "Favorite Things"),
+            ("DATE", "2002"),
+            ("COMMENT", "http://www.kahvi.org"),
+            ("TRACKNUMBER", "2")
+        ]));
+    }
+
+    #[test]
     fn test_parse_comment_header_valid() {
         let test_header = VorbisHeader::new(COMMENT_HEADER_VALID).unwrap();
         let comments = test_header.comments().unwrap();
@@ -410,18 +463,22 @@ mod test {
         assert_eq!(comments.comments.len(), 2);
     }
 
+    #[test]
     fn test_parse_malformed_comment_header_unset_framing_bit() {
         VorbisHeader::new(COMMENT_HEADER_UNSET_FRAMING_BIT).err().unwrap();
     }
 
+    #[test]
     fn test_parse_malformed_comment_header_framing_bit_truncated() {
         VorbisHeader::new(COMMENT_HEADER_FRAMING_BIT_TRUNCATED).err().unwrap();
     }
 
+    #[test]
     fn test_parse_malformed_comment_header_truncated_mid_comment() {
         VorbisHeader::new(COMMENT_HEADER_TRUNCATED_MID_COMMENT).err().unwrap();
     }
 
+    #[test]
     fn test_parse_malformed_comment_header_truncated_comments() {
         VorbisHeader::new(COMMENT_HEADER_TRUNCATED_COMMENTS).err().unwrap();
     }

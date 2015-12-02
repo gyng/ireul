@@ -485,8 +485,10 @@ impl<'a> Iterator for RawPackets<'a> {
         }
 
         let slice = self.page.as_u8_slice();
-        let offset = self.packet_offset;
+
+        let offset = self.body_offset;
         let mut length: usize = 0;
+
         while self.packet < self.packet_count {
             length += slice[self.packet_offset + self.packet] as usize;
             self.packet += 1;
@@ -494,7 +496,8 @@ impl<'a> Iterator for RawPackets<'a> {
                 break;
             }
         }
-        self.packet_offset += length;
+        self.body_offset += length;
+
         Some(&slice[offset..][..length])
     }
 }
@@ -554,7 +557,9 @@ impl Recapture {
 
 #[cfg(test)]
 mod tests {
-    use super::Recapture;
+    use super::{OggTrack, Recapture};
+
+    static SAMPLE_OGG: &'static [u8] = include_bytes!("../testdata/Hydrate-Kenny_Beltrey.ogg");
 
     #[test]
     fn test_capture() {
@@ -581,5 +586,24 @@ mod tests {
         assert_eq!(false, cap.is_captured());
         cap.push_byte(b'S');
         assert_eq!(true, cap.is_captured());
+    }
+
+    #[test]
+    fn test_packets() {
+        let track = OggTrack::new(SAMPLE_OGG).unwrap();
+        let mut pages = track.pages();
+
+        let page0 = pages.next().unwrap();
+        let mut page0packets = page0.raw_packets();
+        assert!(page0packets.next().unwrap().starts_with(b"\x01vorbis"));
+        assert!(page0packets.next().is_none());
+
+
+        let page1 = pages.next().unwrap();
+        let mut page1packets = page1.raw_packets();
+        assert!(page1packets.next().unwrap().starts_with(b"\x03vorbis"));
+        assert!(page1packets.next().unwrap().starts_with(b"\x05vorbis"));
+        assert!(page1packets.next().is_none());
+
     }
 }
