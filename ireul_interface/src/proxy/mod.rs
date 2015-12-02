@@ -5,15 +5,6 @@ use std::sync::mpsc::{
     RecvError
 };
 
-use serde::{Serialize, Deserialize};
-use bincode;
-use bincode::serde::{
-    SerializeError,
-    DeserializeError,
-    serialize,
-    deserialize,
-};
-
 mod track;
 
 pub use self::track::{
@@ -26,7 +17,7 @@ pub use self::track::{
     FastForwardError,
 };
 
-pub const SIZE_LIMIT: bincode::SizeLimit = bincode::SizeLimit::Bounded(20 * 1 << 20);
+// pub const SIZE_LIMIT: bincode::SizeLimit = bincode::SizeLimit::Bounded(20 * 1 << 20);
 
 pub const OP_ENQUEUE_TRACK: u32 = 0x1000;
 pub const OP_FAST_FORWARD: u32 = 0x1001;
@@ -65,14 +56,13 @@ pub type BinderResult<T, E> = Result<T, BinderError<E>>;
 
 // wire-safe error wrapper. converted to ProxyError afterwards.
 
-#[derive(Serialize, Deserialize)]
-pub enum BinderError<T> where T: Serialize + Deserialize {
+pub enum BinderError<T> {
     CallError(T),
     StubImplementation,
     RemoteSerdeError,
 }
 
-impl<T> From<ProxyError<T>> for BinderError<T> where T: Serialize + Deserialize {
+impl<T> From<ProxyError<T>> for BinderError<T> {
     fn from(e: ProxyError<T>) -> Self {
         match e {
             ProxyError::CallError(val) => BinderError::CallError(val),
@@ -92,7 +82,7 @@ pub enum ProxyError<T> {
     RpcError(RpcError),
 }
 
-impl<T> From<BinderError<T>> for ProxyError<T> where T: Serialize + Deserialize {
+impl<T> From<BinderError<T>> for ProxyError<T> {
     fn from(e: BinderError<T>) -> Self {
         match e {
             BinderError::CallError(val) => ProxyError::CallError(val),
@@ -111,8 +101,8 @@ impl<T> From<RpcError> for ProxyError<T> {
 pub enum RpcError {
     SendError(TrySendError<()>),
     RecvError(RecvError),
-    SerializeError(SerializeError),
-    DeserializeError(DeserializeError),
+    SerializeError,
+    DeserializeError,
 }
 
 impl<T> From<TrySendError<T>> for RpcError {
@@ -134,48 +124,9 @@ impl From<RecvError> for RpcError {
     }
 }
 
-impl From<SerializeError> for RpcError {
-    fn from(e: SerializeError) -> Self {
-        RpcError::SerializeError(e)
-    }
-}
-
-impl From<DeserializeError> for RpcError {
-    fn from(e: DeserializeError) -> Self {
-        RpcError::DeserializeError(e)
-    }
-}
-
-pub trait Request: Serialize + Deserialize + Sized {
-    type Value: Serialize + Deserialize;
-    type Error: Serialize + Deserialize;
+pub trait Request: Sized {
+    type Value;
+    type Error;
 
     fn req_type(&self) -> RequestType;
-}
-
-struct CoreProxy {
-    sender: mpsc::SyncSender<RequestWrapper>
-}
-
-fn serialize_req<R: Request>(req: R) -> Result<Vec<u8>, RpcError> {
-    Ok(try!(serialize(&req, SIZE_LIMIT)))
-}
-
-impl CoreProxy {
-    pub fn execute<R: Request>(&mut self, req: R) -> ProxyResult<R::Value, R::Error> {
-        let (tx, rx) = mpsc::sync_channel(1);
-        let req_type = req.req_type();
-        let req_buf = try!(serialize_req(req));
-
-        let wrapper = RequestWrapper {
-            response_queue: tx,
-            req_type: req_type,
-            req_buf: req_buf,
-        };
-        try!(self.sender.try_send(wrapper).map_err(RpcError::from));
-        let resp_buf = try!(rx.recv().map_err(RpcError::from));
-        let resp_res: Result<R::Value, R::Error> =
-            try!(deserialize(&resp_buf).map_err(RpcError::from));;
-        resp_res.map_err(ProxyError::CallError)
-    }
 }

@@ -5,11 +5,3 @@ authors = ["Stacey Ell <stacey.ell@gmail.com>"]
 
 [dependencies.ogg]
 path = "../ogg"
-
-[dependencies.ogg_clock]
-path = "../ogg_clock"
-
-[dependencies]
-serde = "*"
-serde_macros = "*"
-bincode = "*"

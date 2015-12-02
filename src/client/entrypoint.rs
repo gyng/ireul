@@ -9,11 +9,11 @@ pub enum Error {
     Unspecified(String),
 }
 
-pub struct EntryPoint {
-    pub main: fn(Vec<OsString>) -> Result<(), Error>,
-    pub print_usage: fn(&[OsString])
-}
+pub trait EntryPoint: Sync {
+    fn main(&self, args: Vec<OsString>) -> Result<(), Error>;
 
+    fn print_usage(&self, args: &[OsString]);
+}
 
 impl From<byteorder::Error> for Error {
     fn from(e: byteorder::Error) -> Error {
