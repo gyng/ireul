@@ -3,7 +3,8 @@ use std::collections::{VecDeque, HashMap, HashSet};
 
 use rand::{self, Rng, ChaChaRng};
 
-use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
+use ogg::{OggTrack, OggTrackBuf};
+use ogg::vorbis::{Comments, VorbisHeader};
 
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
@@ -29,7 +30,7 @@ impl<R> HandleAllocator<R> where R: Rng {
             return Err(());
         }
 
-        let mut new_handle = 0;
+        let new_handle;
         loop {
             let foo = self.rng.next_u64();
             if !self.allocated.contains(&foo) {
@@ -54,6 +55,7 @@ impl<R> HandleAllocator<R> where R: Rng {
 struct Track {
     handle: Handle,
     data: OggTrackBuf,
+    comments: Option<Comments>,
 }
 
 pub struct PlayQueue {
@@ -98,24 +100,73 @@ impl PlayQueue {
         let handle = try!(self.halloc.generate()
                 .map_err(|()| PlayQueueError::Full));
 
+        let comments = match VorbisHeader::find_comments(track.pages()) {
+            Ok(header) => header.comments(),
+            Err(_) => None
+        };
+
         self.items.push_back(Track {
             handle: handle,
             data: track.to_owned(),
+            comments: comments
         });
         Ok(handle)
     }
 
     pub fn pop_track(&mut self) -> Option<OggTrackBuf> {
         match self.items.pop_front() {
-            Some(Track { handle, data }) => {
+            Some(Track { handle, data, comments }) => {
                 self.halloc.dispose(handle).unwrap();
                 Some(data)
             },
             None => None,
         }
     }
+
+    pub fn get_queue_comments_by_fields(&mut self, fields: &[&str]) -> Vec<Vec<(String, String)>> {
+        self.items.iter().map(|track| {
+            track.comments.as_ref().unwrap().comments.iter().filter_map(|comment|
+                match fields.iter().any(|&field| *field == comment.0) {
+                    true => Some(comment.clone()),
+                    false => None
+                }
+            ).collect()
+        }).collect()
+    }
 }
 
 pub enum PlayQueueError {
     Full,
+}
+
+#[cfg(test)]
+mod test {
+    use ogg::OggTrack;
+    use super::PlayQueue;
+
+    static SAMPLE_OGG: &'static [u8] = include_bytes!("../../ogg/testdata/Hydrate-Kenny_Beltrey.ogg");
+
+    #[test]
+    fn test_get_queue_comments_by_fields() {
+        let mut queue = PlayQueue::new(2);
+        let track1 = OggTrack::new(SAMPLE_OGG).unwrap();
+        let track2 = OggTrack::new(SAMPLE_OGG).unwrap();
+
+        queue.add_track(&track1).ok();
+        queue.add_track(&track2).ok();
+
+        let expected = vec!(
+            vec!(
+                ("TITLE".to_string(), "Hydrate - Kenny Beltrey".to_string()),
+                ("ARTIST".to_string(), "Kenny Beltrey".to_string())
+            ),
+            vec!(
+                ("TITLE".to_string(), "Hydrate - Kenny Beltrey".to_string()),
+                ("ARTIST".to_string(), "Kenny Beltrey".to_string())
+            )
+        );
+
+        let got = queue.get_queue_comments_by_fields(&["ARTIST", "TITLE", "NOTAFIELD"]);
+        assert_eq!(expected, got);
+    }
 }
