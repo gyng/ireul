@@ -125,12 +125,14 @@ impl PlayQueue {
 
     pub fn get_queue_comments_by_fields(&mut self, fields: &[&str]) -> Vec<Vec<(String, String)>> {
         self.items.iter().map(|track| {
-            track.comments.as_ref().unwrap().comments.iter().filter_map(|comment|
-                match fields.iter().any(|&field| *field == comment.0) {
-                    true => Some(comment.clone()),
-                    false => None
-                }
-            ).collect()
+            track.comments.as_ref().map_or(Vec::new(), |comments| {
+                comments.comments.iter().filter_map(|comment|
+                    match fields.iter().any(|&field| *field == comment.0) {
+                        true => Some(comment.clone()),
+                        false => None
+                    }
+                ).collect()
+            })
         }).collect()
     }
 }
