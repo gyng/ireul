@@ -1,10 +1,6 @@
-use std::sync::mpsc::{TrySendError, RecvError};
+use super::super::{RequestType, Request};
 
-use serde::{ser, de};
-use ogg::{OggTrackBuf, OggTrack};
-use super::super::{RequestType, Request, RpcError};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum FastForward {
     TrackBoundary = 0,
 }
@@ -19,7 +15,7 @@ impl FastForward {
 }
 
 /// Skips to the end of the currently playing track
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct FastForwardRequest {
     pub kind: FastForward,
 }
@@ -36,7 +32,7 @@ impl Request for FastForwardRequest {
 pub type FastForwardResult = Result<(), FastForwardError>;
 
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct FastForwardError;
 //
 // pub enum TrackSkipToEndError {

@@ -21,12 +21,7 @@ path = "./ogg_clock"
 path = "./ireul_interface"
 
 [dependencies]
-phf = "0.7.3"
-phf_macros = "0.7.3"
 rustc-serialize = "0.3.16"
-serde = "*"
-serde_macros = "*"
-bincode = "*"
 log = "0.3"
 env_logger = "0.3"
 byteorder = "0.4"

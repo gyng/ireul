@@ -1,15 +1,10 @@
-#![feature(plugin)]
-#![plugin(phf_macros)]
-
 extern crate ogg;
 extern crate ogg_clock;
-extern crate phf;
-extern crate bincode;
 extern crate ireul_interface;
 extern crate byteorder;
 
 use std::ffi::OsString;
-use std::env; // ::args_os;
+use std::env;
 use std::process;
 
 mod enqueue;
@@ -18,15 +13,24 @@ mod entrypoint;
 
 use entrypoint::EntryPoint;
 
-static ENTRY_POINT_MAP: phf::Map<&'static str, &'static EntryPoint> = phf_map! {
-    "enqueue" => &enqueue::ENTRY_POINT,
-    "fast-forward" => &fastforward::ENTRY_POINT,
-};
+static ENTRY_POINT_MAP: &'static [(&'static str, &'static EntryPoint)] = &[
+    ("enqueue", &enqueue::EntryPoint),
+    ("fast-forward", &fastforward::EntryPoint),
+];
 
 fn print_usage(args: &[OsString]) {
-    for (key, val) in ENTRY_POINT_MAP.entries() {
-        (val.print_usage)(args);
+    for &(key, val) in ENTRY_POINT_MAP.iter() {
+        val.print_usage(args);
     }
+}
+
+fn get_entry_point(name: &str) -> Option<&'static EntryPoint> {
+    for &(key, val) in ENTRY_POINT_MAP.iter() {
+        if key == name {
+            return Some(val);
+        }
+    }
+    None
 }
 
 fn main() {
@@ -35,15 +39,15 @@ fn main() {
     let sub_command = args[1].clone().into_string().ok().unwrap();
 
     let help_args = args.clone();
-    if let Some(entry_pt) = ENTRY_POINT_MAP.get(&sub_command[..]) {
-        match (entry_pt.main)(args) {
+    if let Some(entry_pt) = get_entry_point(&sub_command) {
+        match entry_pt.main(args) {
             Ok(()) => (),
             Err(entrypoint::Error::Unspecified(msg)) => {
                 println!("subcommand failed: {}", msg);
                 process::exit(1);
             },
             Err(entrypoint::Error::InvalidArguments) => {
-                (entry_pt.print_usage)(&help_args);
+                entry_pt.print_usage(&help_args);
                 process::exit(1);
             },
         }

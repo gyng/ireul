@@ -1,18 +1,15 @@
-#![feature(custom_derive)]
-
-extern crate bincode;
-extern crate ogg;
-extern crate ogg_clock;
-extern crate rustc_serialize;
-extern crate serde;
-extern crate ireul_interface;
 #[macro_use]
 extern crate log;
-extern crate env_logger;
+
 extern crate byteorder;
-extern crate url;
-extern crate toml;
+extern crate env_logger;
+extern crate ireul_interface;
+extern crate ogg;
+extern crate ogg_clock;
 extern crate rand;
+extern crate rustc_serialize;
+extern crate toml;
+extern crate url;
 
 use std::thread;
 use std::env;
@@ -29,7 +26,6 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
 use ogg_clock::OggClock;
 use ireul_interface::proxy::{
-    SIZE_LIMIT,
     RequestWrapper,
     RequestType,
     BinderError,

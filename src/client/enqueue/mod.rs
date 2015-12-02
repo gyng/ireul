@@ -3,25 +3,31 @@ use std::fs::{self, File};
 use std::ffi::OsString;
 use std::net::TcpStream;
 
-use bincode::serde as bincode;
 use byteorder::{self, ReadBytesExt, WriteBytesExt, BigEndian};
 
 use ogg::{OggTrackBuf, OggPageCheckError};
 use ireul_interface::proxy::{
-    SIZE_LIMIT,
     RequestType,
     EnqueueTrackRequest,
     EnqueueTrackResult,
     EnqueueTrackError,
 };
 
-use ::entrypoint::EntryPoint;
-use ::entrypoint::Error as EntryPointError;
+use ::entrypoint::{self, Error as EntryPointError};
 
-pub static ENTRY_POINT: EntryPoint = EntryPoint {
-    main: main,
-    print_usage: print_usage,
-};
+pub struct EntryPoint;
+
+unsafe impl Sync for EntryPoint {}
+
+impl ::entrypoint::EntryPoint for EntryPoint {
+    fn main(&self, args: Vec<OsString>) -> Result<(), EntryPointError> {
+        main(args)
+    }
+
+    fn print_usage(&self, args: &[OsString]) {
+        print_usage(args)
+    }
+}
 
 #[derive(Debug)]
 struct ProgramArgs {
@@ -79,7 +85,7 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
         try!(limit_reader.read_to_end(&mut resp_buf));
     }
 
-    let mut frame = io::Cursor::new(&resp_buf);
+    let mut frame = io::Cursor::new(&resp_buf[..]);
     let res: EnqueueTrackResult = match try!(frame.read_u8()) {
         0 => {
             let handle = try!(frame.read_u64::<BigEndian>());

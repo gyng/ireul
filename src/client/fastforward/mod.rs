@@ -3,26 +3,31 @@ use std::fs::{self, File};
 use std::ffi::OsString;
 use std::net::TcpStream;
 
-use bincode::serde as bincode;
 use byteorder::{self, ReadBytesExt, WriteBytesExt, BigEndian};
 
 use ogg::{OggTrackBuf, OggPageCheckError};
 use ireul_interface::proxy::{
-    SIZE_LIMIT,
     RequestType,
     FastForwardRequest,
     FastForwardResult,
     FastForwardError,
 };
 
-use ::entrypoint::EntryPoint;
-use ::entrypoint::Error as EntryPointError;
+use ::entrypoint::{self, Error as EntryPointError};
 
-pub static ENTRY_POINT: EntryPoint = EntryPoint {
-    main: main,
-    print_usage: print_usage,
-};
+pub struct EntryPoint;
 
+unsafe impl Sync for EntryPoint {}
+
+impl ::entrypoint::EntryPoint for EntryPoint {
+    fn main(&self, args: Vec<OsString>) -> Result<(), EntryPointError> {
+        main(args)
+    }
+
+    fn print_usage(&self, args: &[OsString]) {
+        print_usage(args)
+    }
+}
 
 #[derive(Debug)]
 struct ProgramArgs {
