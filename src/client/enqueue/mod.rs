@@ -23,25 +23,6 @@ pub static ENTRY_POINT: EntryPoint = EntryPoint {
     print_usage: print_usage,
 };
 
-impl From<byteorder::Error> for EntryPointError {
-    fn from(e: byteorder::Error) -> EntryPointError {
-        EntryPointError::Unspecified(format!("{}", e))
-    }
-}
-
-impl From<io::Error> for EntryPointError {
-    fn from(e: io::Error) -> EntryPointError {
-        EntryPointError::Unspecified(format!("{}", e))
-    }
-}
-
-impl From<OggPageCheckError> for EntryPointError {
-    fn from(e: OggPageCheckError) -> EntryPointError {
-        EntryPointError::Unspecified(format!("{:?}", e))
-    }
-}
-
-
 #[derive(Debug)]
 struct ProgramArgs {
     app_name: OsString,
@@ -87,20 +68,35 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(RequestType::EnqueueTrack.to_op_code()));
+    let slice = track.as_u8_slice();
+    try!(conn.write_u32::<BigEndian>(slice.len() as u32));
+    try!(conn.write_all(&slice));
 
-    let req = EnqueueTrackRequest { track: track };
-    let buf = bincode::serialize(&req, SIZE_LIMIT).unwrap();
-    try!(conn.write_u32::<BigEndian>(buf.len() as u32));
-    try!(conn.write_all(&buf));
-
+    let frame_length = try!(conn.read_u32::<BigEndian>());
     let mut resp_buf = Vec::new();
-    let resp_len = try!(conn.read_u32::<BigEndian>());
     {
-        let mut limit_reader = Read::by_ref(&mut conn).take(resp_len as u64);
+        let mut limit_reader = Read::by_ref(&mut conn).take(frame_length as u64);
         try!(limit_reader.read_to_end(&mut resp_buf));
     }
 
-    let res: EnqueueTrackResult = bincode::deserialize(&resp_buf).unwrap();
+    let mut frame = io::Cursor::new(&resp_buf);
+    let res: EnqueueTrackResult = match try!(frame.read_u8()) {
+        0 => {
+            let handle = try!(frame.read_u64::<BigEndian>());
+            println!("got handle {:#x}", handle);
+            Ok(handle)
+        },
+        _ => {
+            let errno = try!(frame.read_u32::<BigEndian>());
+            let errstr_len = try!(frame.read_u32::<BigEndian>());
+            let mut errstr = String::new();
+            {
+                let mut limit_reader = Read::by_ref(&mut frame).take(errstr_len as u64);
+                try!(limit_reader.read_to_string(&mut errstr));
+            }
+            Err(EnqueueTrackError::from_u32(errno).unwrap())
+        }
+    };
     println!("got response: {:?}", res);
 
     try!(conn.write_u8(0));

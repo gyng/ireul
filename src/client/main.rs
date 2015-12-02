@@ -13,12 +13,14 @@ use std::env; // ::args_os;
 use std::process;
 
 mod enqueue;
+mod fastforward;
 mod entrypoint;
 
 use entrypoint::EntryPoint;
 
 static ENTRY_POINT_MAP: phf::Map<&'static str, &'static EntryPoint> = phf_map! {
     "enqueue" => &enqueue::ENTRY_POINT,
+    "fast-forward" => &fastforward::ENTRY_POINT,
 };
 
 fn print_usage(args: &[OsString]) {

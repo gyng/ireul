@@ -1,5 +1,5 @@
 mod enqueue;
-mod skip_to_end;
+mod fast_forward;
 
 pub use self::enqueue::{
     EnqueueTrackRequest,
@@ -7,7 +7,9 @@ pub use self::enqueue::{
     EnqueueTrackResult,
 };
 
-pub use self::skip_to_end::{
-    TrackSkipToEndRequest,
-    TrackSkipToEndError,
+pub use self::fast_forward::{
+    FastForward,
+    FastForwardRequest,
+    FastForwardResult,
+    FastForwardError,
 };

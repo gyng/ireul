@@ -11,6 +11,7 @@ use std::borrow::Cow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 use byteorder::Error as ByteOrderError;
 
+mod reader;
 mod slice;
 mod vorbis;
 mod crc;
@@ -435,9 +436,23 @@ impl OggPage {
         }
     }
 
+    pub fn body(&self) -> &[u8] {
+        let slice: &[u8] = self.as_u8_slice();
+        let (header, body) = OggPage::measure(slice).unwrap();
+        body
+    }
+
     /// Am iterator of packet slices
-    pub fn packets<'a>(&'a self) -> Packets<'a> {
-        Packets { page: &self, packet: 0 }
+    pub fn raw_packets<'a>(&'a self) -> RawPackets<'a> {
+        let slice: &[u8] = self.as_u8_slice();
+        let packet_count = slice[26] as usize;
+        RawPackets {
+            page: &self,
+            packet: 0,
+            packet_offset: 27,
+            packet_count: packet_count,
+            body_offset: 27 + packet_count,
+        }
     }
 
     pub fn into_cow<'a>(&'a self) -> Cow<'a, OggPage> {
@@ -445,17 +460,45 @@ impl OggPage {
     }
 }
 
-pub struct Packets<'a> {
+pub struct RawPackets<'a> {
     page: &'a OggPage,
+
+    // the current packet number
     packet: usize,
+
+    // the total number of packets
+    packet_count: usize,
+
+    // where the next packet size lies in the page
+    packet_offset: usize,
+
+    // where the next packet lies in the page
+    body_offset: usize,
 }
 
-impl<'a> Iterator for Packets<'a> {
+impl<'a> Iterator for RawPackets<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<&'a [u8]> {
-        let packet_slice = self.page;
-        unimplemented!();
+        if self.packet_count <= self.packet {
+            return None;
+        }
+
+        let slice = self.page.as_u8_slice();
+
+        let offset = self.body_offset;
+        let mut length: usize = 0;
+
+        while self.packet < self.packet_count {
+            length += slice[self.packet_offset + self.packet] as usize;
+            self.packet += 1;
+            if length < 255 {
+                break;
+            }
+        }
+        self.body_offset += length;
+
+        Some(&slice[offset..][..length])
     }
 }
 
@@ -514,7 +557,9 @@ impl Recapture {
 
 #[cfg(test)]
 mod tests {
-    use super::Recapture;
+    use super::{OggTrack, Recapture};
+
+    static SAMPLE_OGG: &'static [u8] = include_bytes!("../testdata/Hydrate-Kenny_Beltrey.ogg");
 
     #[test]
     fn test_capture() {
@@ -541,5 +586,24 @@ mod tests {
         assert_eq!(false, cap.is_captured());
         cap.push_byte(b'S');
         assert_eq!(true, cap.is_captured());
+    }
+
+    #[test]
+    fn test_packets() {
+        let track = OggTrack::new(SAMPLE_OGG).unwrap();
+        let mut pages = track.pages();
+
+        let page0 = pages.next().unwrap();
+        let mut page0packets = page0.raw_packets();
+        assert!(page0packets.next().unwrap().starts_with(b"\x01vorbis"));
+        assert!(page0packets.next().is_none());
+
+
+        let page1 = pages.next().unwrap();
+        let mut page1packets = page1.raw_packets();
+        assert!(page1packets.next().unwrap().starts_with(b"\x03vorbis"));
+        assert!(page1packets.next().unwrap().starts_with(b"\x05vorbis"));
+        assert!(page1packets.next().is_none());
+
     }
 }
