@@ -128,10 +128,6 @@ impl VorbisHeader {
         where I: Iterator<Item=&'a OggPage>
     {
         for page in iter {
-            println!("found a page: {:?}", page.as_u8_slice());
-            for packet in page.raw_packets() {
-                println!("found a packet: {:?}", packet);
-            }
             for packet in page.raw_packets() {
                 if let Ok(vpkt) = VorbisHeader::new(packet) {
                     if vpkt.comments().is_some() {
