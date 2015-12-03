@@ -5,10 +5,8 @@ use rand::{self, Rng, ChaChaRng};
 
 use ogg::{OggTrack, OggTrackBuf};
 use ogg::vorbis::{Comments, VorbisHeader};
+use ireul_interface::track::Handle;
 
-
-#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-pub struct Handle(pub u64);
 
 struct HandleAllocator<R> {
     rng: R,
