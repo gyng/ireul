@@ -1,3 +1,5 @@
+extern crate time;
+
 use std::sync::mpsc::{
     self,
     SyncSender,
@@ -5,7 +7,7 @@ use std::sync::mpsc::{
     RecvError
 };
 
-mod track;
+pub mod track;
 
 pub use self::track::{
     EnqueueTrackRequest,
