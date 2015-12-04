@@ -224,6 +224,28 @@ impl Deserialize for String {
     }
 }
 
+impl<V, E> Deserialize for Result<V, E> where V: Deserialize, E: Deserialize {
+    fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
+        let type_id = try!(buf.read_u16::<BigEndian>());
+        match type_id {
+            TYPE_RESULT_OK => {
+                let val: V = try!(Deserialize::read(buf));
+                Ok(Ok(val))
+            },
+            TYPE_RESULT_ERR => {
+                let val: E = try!(Deserialize::read(buf));
+                Ok(Err(val))
+            },
+            _ => {
+                Err(io::Error::new(io::ErrorKind::Other, format!(
+                    "unexpected type {} (want {} or {})",
+                    type_id, TYPE_RESULT_OK, TYPE_RESULT_ERR)))
+            }
+        }
+    }
+}
+
+
 pub fn null_read<R>(buf: &mut R, len: u64) -> io::Result<()> where R: Read {
     for byte in buf.by_ref().take(len).bytes() {
         try!(byte);
@@ -287,4 +309,43 @@ pub fn skip_entity(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
             Err(io::Error::new(io::ErrorKind::Other, "unknown type"))
         }
     }
+}
+
+pub fn expect_type(buf: &mut io::Cursor<Vec<u8>>, type_id: u16) -> io::Result<()> {
+    let got_type_id = try!(buf.read_u16::<BigEndian>());
+    if got_type_id != type_id {
+        return Err(io::Error::new(io::ErrorKind::Other, "unexpected type"));
+    }
+    Ok(())
+}
+
+pub fn write_empty_struct(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
+    try!(buf.write_u16::<BigEndian>(TYPE_STRUCT));
+    try!(buf.write_u32::<BigEndian>(0));
+    Ok(())
+}
+
+pub fn read_empty_struct(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
+    try!(expect_type(buf, TYPE_STRUCT));
+    let field_count = try!(buf.read_u32::<BigEndian>());
+    for _ in 0..field_count {
+        let _: String = try!(Deserialize::read(buf));
+        try!(skip_entity(buf));
+    }
+
+    Ok(())
+}
+
+pub fn deserialize<T>(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<T>
+    where T: Deserialize
+{
+    Deserialize::read(buf)
+}
+
+pub fn serialize<T>(item: &T) -> io::Result<Vec<u8>>
+    where T: Serialize
+{
+    let mut buf = io::Cursor::new(Vec::new());
+    try!(Serialize::write(item, &mut buf));
+    Ok(buf.into_inner())
 }

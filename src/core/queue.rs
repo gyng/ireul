@@ -5,7 +5,7 @@ use rand::{self, Rng, ChaChaRng};
 
 use ogg::{OggTrack, OggTrackBuf};
 use ogg::vorbis::{Comments, VorbisHeader};
-use ireul_interface::track::Handle;
+use ireul_interface::proxy::track::model::{self, Handle};
 
 
 struct HandleAllocator<R> {
@@ -50,10 +50,89 @@ impl<R> HandleAllocator<R> where R: Rng {
     }
 }
 
-struct Track {
+#[derive(Clone)]
+pub struct Track {
     handle: Handle,
     data: OggTrackBuf,
-    comments: Option<Comments>,
+    comments: Comments,
+
+    artist: String,
+    album: String,
+    title: String,
+
+    sample_rate: u64,
+    sample_count: u64,
+}
+
+impl Track {
+    pub fn from_ogg_track(handle: Handle, ogg: OggTrackBuf) -> Track {
+        use std::ascii::AsciiExt;
+
+        let id_header = match VorbisHeader::find_identification(ogg.pages()) {
+            Ok(header) => header.identification_header(),
+            Err(_) => None
+        }.expect("Invalid OggTrackBuf");
+
+        let comments = match VorbisHeader::find_comments(ogg.pages()) {
+            Ok(header) => header.comments(),
+            Err(_) => None
+        }.expect("Invalid OggTrackBuf");
+
+        let mut sample_count = 0;
+        for page in ogg.pages() {
+            let page_pos = page.position();
+            if sample_count < page_pos {
+                sample_count = page_pos;
+            }
+        }
+
+        let mut artist: Option<String> = None;
+        let mut album: Option<String> = None;
+        let mut title: Option<String> = None;
+
+        for &(ref key, ref val) in comments.comments.iter() {
+            if key.eq_ignore_ascii_case("ARTIST") {
+                artist = Some(val.clone());
+            }
+            if key.eq_ignore_ascii_case("ALBUM") {
+                album = Some(val.clone());
+            }
+            if key.eq_ignore_ascii_case("TITLE") {
+                title = Some(val.clone());
+            }
+        }
+
+        Track {
+            handle: handle,
+            data: ogg,
+            comments: comments,
+
+            artist: artist.unwrap_or_else(|| "".to_string()),
+            album: album.unwrap_or_else(|| "".to_string()),
+            title: title.unwrap_or_else(|| "".to_string()),
+
+            sample_rate: id_header.audio_sample_rate as u64,
+            sample_count: sample_count,
+        }
+    }
+
+    pub fn into_inner(self) -> OggTrackBuf {
+        self.data
+    }
+
+    pub fn get_track_info(&self) -> model::TrackInfo {
+        model::TrackInfo {
+            handle: self.handle,
+
+            artist: self.artist.clone(),
+            album: self.album.clone(),
+            title: self.title.clone(),
+
+            sample_rate: self.sample_rate,
+            sample_count: self.sample_count,
+            sample_position: 0,
+        }
+    }
 }
 
 pub struct PlayQueue {
@@ -98,24 +177,15 @@ impl PlayQueue {
         let handle = try!(self.halloc.generate()
                 .map_err(|()| PlayQueueError::Full));
 
-        let comments = match VorbisHeader::find_comments(track.pages()) {
-            Ok(header) => header.comments(),
-            Err(_) => None
-        };
-
-        self.items.push_back(Track {
-            handle: handle,
-            data: track.to_owned(),
-            comments: comments
-        });
+        self.items.push_back(Track::from_ogg_track(handle, track.to_owned()));
         Ok(handle)
     }
 
-    pub fn pop_track(&mut self) -> Option<OggTrackBuf> {
+    pub fn pop_track(&mut self) -> Option<Track> {
         match self.items.pop_front() {
-            Some(Track { handle, data, comments }) => {
-                self.halloc.dispose(handle).unwrap();
-                Some(data)
+            Some(track) => {
+                self.halloc.dispose(track.handle).unwrap();
+                Some(track)
             },
             None => None,
         }
@@ -123,15 +193,19 @@ impl PlayQueue {
 
     pub fn get_queue_comments_by_fields(&mut self, fields: &[&str]) -> Vec<Vec<(String, String)>> {
         self.items.iter().map(|track| {
-            track.comments.as_ref().map_or(Vec::new(), |comments| {
-                comments.comments.iter().filter_map(|comment|
-                    match fields.iter().any(|&field| *field == comment.0) {
-                        true => Some(comment.clone()),
-                        false => None
-                    }
-                ).collect()
-            })
+            track.comments.comments.iter().filter_map(|comment|
+                match fields.iter().any(|&field| *field == comment.0) {
+                    true => Some(comment.clone()),
+                    false => None
+                }
+            ).collect()
         }).collect()
+    }
+
+    pub fn track_infos(&self) -> Vec<model::TrackInfo> {
+        self.items.iter()
+            .map(Track::get_track_info)
+            .collect()
     }
 }
 

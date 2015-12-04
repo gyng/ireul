@@ -10,12 +10,14 @@ use std::process;
 mod enqueue;
 mod fastforward;
 mod entrypoint;
+mod queue;
 
 use entrypoint::EntryPoint;
 
 static ENTRY_POINT_MAP: &'static [(&'static str, &'static EntryPoint)] = &[
     ("enqueue", &enqueue::EntryPoint),
     ("fast-forward", &fastforward::EntryPoint),
+    ("queue", &queue::EntryPoint),
 ];
 
 fn print_usage(args: &[OsString]) {

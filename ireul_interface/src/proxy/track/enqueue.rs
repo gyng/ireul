@@ -1,12 +1,14 @@
 use std::io;
 
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use ogg::{OggTrackBuf};
 
 use super::super::{RequestType, Request};
 use ::proto::{self, Deserialize, Serialize};
+use super::model::Handle;
 
+const REQUEST_FIELD_COUNT: u32 = 1;
 
 pub struct EnqueueTrackRequest {
     pub track: OggTrackBuf,
@@ -14,11 +16,7 @@ pub struct EnqueueTrackRequest {
 
 impl Deserialize for EnqueueTrackRequest {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
-        let type_id = try!(buf.read_u16::<BigEndian>());
-        if type_id != proto::TYPE_STRUCT {
-            return Err(io::Error::new(io::ErrorKind::Other, "unexpected type"));
-        }
-
+        try!(proto::expect_type(buf, proto::TYPE_STRUCT));
         let field_count = try!(buf.read_u32::<BigEndian>());
 
         let mut track: Option<Vec<u8>> = None;
@@ -46,6 +44,17 @@ impl Deserialize for EnqueueTrackRequest {
     }
 }
 
+impl Serialize for EnqueueTrackRequest {
+    fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
+        try!(buf.write_u16::<BigEndian>(proto::TYPE_STRUCT));
+        try!(buf.write_u32::<BigEndian>(REQUEST_FIELD_COUNT));
+
+        try!(Serialize::write("track", buf));
+        try!(Serialize::write(self.track.as_u8_slice(), buf));
+
+        Ok(())
+    }
+}
 
 impl Request for EnqueueTrackRequest {
     type Value = ();
@@ -56,7 +65,7 @@ impl Request for EnqueueTrackRequest {
     }
 }
 
-pub type EnqueueTrackResult = Result<u64, EnqueueTrackError>;
+pub type EnqueueTrackResult = Result<Handle, EnqueueTrackError>;
 
 #[derive(Debug, Clone)]
 pub enum EnqueueTrackError {
@@ -82,6 +91,16 @@ impl EnqueueTrackError {
     }
 }
 
+impl Deserialize for EnqueueTrackError {
+    fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
+        let num: u32 = try!(Deserialize::read(buf));
+        EnqueueTrackError::from_u32(num)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::Other, "unexpected EnqueueTrackError value")
+            })
+    }
+}
+
 impl Serialize for EnqueueTrackError {
     fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
         try!(Serialize::write(&self.to_u32(), buf));
@@ -96,6 +115,7 @@ mod tests {
         EnqueueTrackResult,
         EnqueueTrackError,
     };
+    use super::super::model::Handle;
     use ::proto::Serialize;
 
     fn serialize<T: Serialize>(item: &T) -> Vec<u8> {
@@ -106,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_serialize() {
-        let ok_val: EnqueueTrackResult = Ok(0xD825959D752F9A3E);
+        let ok_val: EnqueueTrackResult = Ok(Handle(0xD825959D752F9A3E));
         assert_eq!(&serialize(&ok_val)[..], &[
             // Result::Ok type
             0x00, 0x85,

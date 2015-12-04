@@ -6,6 +6,8 @@ use std::net::TcpStream;
 use byteorder::{self, ReadBytesExt, WriteBytesExt, BigEndian};
 
 use ogg::{OggTrackBuf, OggPageCheckError};
+
+use ireul_interface::proto;
 use ireul_interface::proxy::{
     RequestType,
     FastForwardRequest,
@@ -49,13 +51,16 @@ impl ProgramArgs {
 }
 
 
-pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
+fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     let app_name = args[0].clone();
     let args = try!(ProgramArgs::new(args));
 
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
+
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(RequestType::FastForward.to_op_code()));
+
+
     try!(conn.write_u32::<BigEndian>(4));
     try!(conn.write_u32::<BigEndian>(0));
 
@@ -79,7 +84,7 @@ pub fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     Ok(())
 }
 
-pub fn print_usage(args: &[OsString]) {
+fn print_usage(args: &[OsString]) {
     println!("{} fast-forward", args[0].clone().into_string().ok().unwrap());
     println!("");
     println!("    Skips the currently-playing track");

@@ -294,6 +294,7 @@ pub struct IdentificationHeader {
     pub blocksize_1: u8,
 }
 
+#[derive(Clone)]
 pub struct Comments {
     pub vendor: String,
     pub comments: Vec<(String, String)>

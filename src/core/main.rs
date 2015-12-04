@@ -26,21 +26,29 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
 use ogg::vorbis::VorbisHeader;
 use ogg_clock::OggClock;
+
+use ireul_interface::proto;
+use ireul_interface::proxy::track::model::{self, Handle};
+use ireul_interface::proxy::track::{
+    StatusRequest,
+    StatusResult,
+};
 use ireul_interface::proxy::{
     RequestWrapper,
     RequestType,
     BinderError,
     EnqueueTrackRequest,
     EnqueueTrackError,
+    EnqueueTrackResult,
     FastForward,
     FastForwardRequest,
-    FastForwardError,
+    FastForwardResult,
 };
 
 mod queue;
 mod icecastwriter;
 
-use queue::{PlayQueue, Handle, PlayQueueError};
+use queue::{PlayQueue, PlayQueueError};
 use icecastwriter::{
     IceCastWriter,
     IceCastWriterOptions,
@@ -116,7 +124,8 @@ fn main() {
         playing_offline: false,
         buffer: VecDeque::new(),
         play_queue: PlayQueue::new(10),
-        offline_track: offline_track,
+        offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
+        playing: None,
     };
 
     let control = TcpListener::bind("0.0.0.0:3001").unwrap();
@@ -148,6 +157,11 @@ fn validate_positions(track: &OggTrack) -> Result<(), ()> {
         current = position;
     }
 
+    Ok(())
+}
+
+fn validate_comment_section(track: &OggTrack) -> Result<(), ()> {
+    let _ = try!(VorbisHeader::find_comments(track.pages()));
     Ok(())
 }
 
@@ -206,7 +220,7 @@ impl Core {
         })
     }
 
-    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> Result<Handle, EnqueueTrackError> {
+    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
         let EnqueueTrackRequest { mut track } = req;
         {
             let mut pages = 0;
@@ -225,6 +239,9 @@ impl Core {
         try!(validate_positions(&track)
             .map_err(|()| EnqueueTrackError::InvalidTrack));
 
+        try!(validate_comment_section(&track)
+            .map_err(|()| EnqueueTrackError::InvalidTrack));
+
         try!(check_sample_rate(self.output.clock.sample_rate(), &track)
             .map_err(|()| EnqueueTrackError::BadSampleRate));
 
@@ -240,9 +257,15 @@ impl Core {
         handle
     }
 
-    fn fast_forward(&mut self, req: FastForwardRequest) -> Result<(), FastForwardError> {
+    fn fast_forward(&mut self, req: FastForwardRequest) -> FastForwardResult {
         try!(self.output.fast_forward(req.kind));
         Ok(())
+    }
+
+    fn queue_status(&mut self, _req: StatusRequest) -> StatusResult {
+        Ok(model::Queue {
+            upcoming: self.output.get_track_infos(),
+        })
     }
 
     fn handle_command(&mut self, req_wr: RequestWrapper) {
@@ -352,64 +375,35 @@ impl<'a> CoreBinder<'a> {
             RequestType::FastForward => {
                 self.fast_forward(&req_buf)
             },
+            RequestType::QueueStatus => {
+                self.queue_status(&req_buf)
+            }
         };
         response_queue.send(response).unwrap();
     }
 
     fn enqueue_track(&mut self, req: &[u8]) -> Vec<u8> {
         info!("CoreBinder::enqueue_track");
-        let track_res: Result<Handle, EnqueueTrackError> =
-            OggTrack::new(req)
-                .map(|t| EnqueueTrackRequest { track: t.to_owned() })
-                .map_err(|_| EnqueueTrackError::InvalidTrack)
-                .and_then(|req| self.core.enqueue_track(req));
-
-        let mut buf = io::Cursor::new(Vec::new());
-        match track_res {
-            Ok(Handle(handle_id)) => {
-                buf.write_u8(0).unwrap();
-                buf.write_u64::<BigEndian>(handle_id).unwrap();
-            },
-            Err(err) => {
-                buf.write_u8(1).unwrap();
-                // error kind
-                buf.write_u32::<BigEndian>(err as u32).unwrap();
-                // future expansion: error message
-                buf.write_u32::<BigEndian>(0).unwrap();
-            }
-        }
-        buf.into_inner()
+        let mut cursor = io::Cursor::new(req.to_vec());
+        let req: EnqueueTrackRequest = proto::deserialize(&mut cursor).unwrap();
+        let resp = self.core.enqueue_track(req);
+        proto::serialize(&resp).unwrap()
     }
 
     fn fast_forward(&mut self, req: &[u8]) -> Vec<u8> {
         info!("CoreBinder::fast_forward");
-        if req.len() < 4 {
-            // should be an error condition... ProtocolError.
-            // we need to disconnect the client in this case, usually.
-            return Vec::new();
-        }
+        let mut cursor = io::Cursor::new(req.to_vec());
+        let req: FastForwardRequest = proto::deserialize(&mut cursor).unwrap();
+        let resp = self.core.fast_forward(req);
+        proto::serialize(&resp).unwrap()
+    }
 
-        let ff_type = BigEndian::read_u32(req);
-        let req: FastForwardRequest =
-            FastForward::from_u32(ff_type)
-                .map(|ff| FastForwardRequest { kind: ff })
-                .unwrap();
-
-        let mut buf = io::Cursor::new(Vec::new());
-        info!("core.fast_forward({:?})", req);
-        match self.core.fast_forward(req) {
-            Ok(()) => {
-                buf.write_u8(0).unwrap();
-            },
-            Err(err) => {
-                buf.write_u8(1).unwrap();
-                // error kind
-                buf.write_u32::<BigEndian>(0).unwrap();
-                // future expansion: error message
-                buf.write_u32::<BigEndian>(0).unwrap();
-            }
-        };
-        buf.into_inner()
+    fn queue_status(&mut self, req: &[u8]) -> Vec<u8> {
+        info!("CoreBinder::queue_status");
+        let mut cursor = io::Cursor::new(req.to_vec());
+        let req: StatusRequest = proto::deserialize(&mut cursor).unwrap();
+        let resp = self.core.queue_status(req);
+        proto::serialize(&resp).unwrap()
     }
 }
 
@@ -423,22 +417,25 @@ struct OutputManager {
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
     play_queue: PlayQueue,
-    offline_track: OggTrackBuf,
+    offline_track: queue::Track,
+    playing: Option<model::TrackInfo>,
 }
 
 impl OutputManager {
     fn fill_buffer(&mut self) {
-        let mut track = match self.play_queue.pop_track() {
+        let track: queue::Track = match self.play_queue.pop_track() {
             Some(track) => {
                 self.playing_offline = false;
+                self.playing = Some(track.get_track_info());
                 track
             },
             None => {
                 self.playing_offline = true;
+                self.playing = None;
                 self.offline_track.clone()
             }
         };
-
+        let mut track = track.into_inner();
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
         self.cur_serial = self.cur_serial.wrapping_add(0);
@@ -453,7 +450,7 @@ impl OutputManager {
         self.buffer.pop_front().unwrap()
     }
 
-    fn fast_forward_track_boundary(&mut self) -> Result<(), FastForwardError> {
+    fn fast_forward_track_boundary(&mut self) -> FastForwardResult {
         loop {
             let page = self.get_next_page();
             debug!("checking page...");
@@ -466,7 +463,7 @@ impl OutputManager {
         Ok(())
     }
 
-    fn fast_forward(&mut self, kind: FastForward) -> Result<(), FastForwardError> {
+    fn fast_forward(&mut self, kind: FastForward) -> FastForwardResult {
         match kind {
             FastForward::TrackBoundary => {
                 self.fast_forward_track_boundary()
@@ -479,10 +476,23 @@ impl OutputManager {
         self.clock.wait(&page).unwrap();
         self.connector.send_ogg_page(&page).unwrap();
 
+        if let Some(playing) = self.playing.as_mut() {
+            playing.sample_position = page.position();
+        }
+
         debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}",
             page.position(),
             page.serial(),
             page.sequence());
+    }
+
+    fn get_track_infos(&self) -> Vec<model::TrackInfo> {
+        let mut out: Vec<model::TrackInfo> = Vec::new();
+        if let Some(ref playing) = self.playing {
+            out.push(playing.clone());
+        }
+        out.extend(self.play_queue.track_infos().into_iter());
+        out
     }
 }
 

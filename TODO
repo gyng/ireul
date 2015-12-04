@@ -1,0 +1,9 @@
+todo
+====
+- [x] auto skip fallback
+- [ ] queue retrieval
+- [ ] queue manipulation
+- [ ] Live fallback replacement
+- [ ] DJ support
+  - [ ] DJ authentication
+
