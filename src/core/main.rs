@@ -10,11 +10,13 @@ extern crate rand;
 extern crate rustc_serialize;
 extern crate toml;
 extern crate url;
+extern crate time;
 
 use std::thread;
 use std::env;
 use std::fmt;
 use std::collections::HashSet;
+use std::sync::{self, Arc, Mutex};
 use std::sync::mpsc::{self};
 use std::net::{TcpStream, TcpListener};
 use std::collections::{HashMap, VecDeque};
@@ -22,6 +24,7 @@ use std::io::{self, Read, Write};
 use std::fs::File;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
+use time::SteadyTime;
 
 use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
 use ogg::vorbis::VorbisHeader;
@@ -120,6 +123,7 @@ fn main() {
         cur_serial: 0,
         cur_sequence: 0,
         // position: 0,
+        steady_clock: SteadyTime::now(),
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
@@ -129,10 +133,23 @@ fn main() {
     };
 
     let control = TcpListener::bind("0.0.0.0:3001").unwrap();
-    let mut core = Core::new(control, output_manager).unwrap();
-    loop {
-        core.tick();
 
+    let core = Core::new(output_manager);
+    let core = Arc::new(Mutex::new(core));
+
+    let client_core = core.clone();
+    thread::spawn(move || {
+        client_acceptor(control, client_core.clone());
+    });
+
+    loop {
+        let next_tick_deadline = {
+            let mut exc_core = core.lock().unwrap();
+            exc_core.tick()
+        };
+
+        let sleep_time = next_tick_deadline - SteadyTime::now();
+        ::std::thread::sleep_ms(sleep_time.num_milliseconds() as u32);
     }
 }
 
@@ -202,22 +219,11 @@ fn final_position(track: &OggTrack) -> Option<u64> {
 
 struct Core {
     output: OutputManager,
-    proxy_rx: mpsc::Receiver<RequestWrapper>,
 }
 
 impl Core {
-    fn new(control: TcpListener, om: OutputManager) -> io::Result<Core> {
-        let (tx, rx) = mpsc::sync_channel(5);
-
-        let proxy_tx_client = tx.clone();
-        thread::spawn(move || {
-            client_acceptor(control, proxy_tx_client);
-        });
-
-        Ok(Core {
-            output: om,
-            proxy_rx: rx,
-        })
+    fn new(om: OutputManager) -> Core {
+        Core { output: om }
     }
 
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
@@ -268,23 +274,12 @@ impl Core {
         })
     }
 
-    fn handle_command(&mut self, req_wr: RequestWrapper) {
-        let mut binder = CoreBinder { core: self };
-        binder.handle_command(req_wr)
-    }
-
-    fn tick(&mut self) {
-        loop {
-            match self.proxy_rx.try_recv() {
-                Ok(cmd) => self.handle_command(cmd),
-                Err(err) => break,
-            }
-        }
-        self.output.copy_page();
+    fn tick(&mut self) -> SteadyTime {
+        self.output.copy_page()
     }
 }
 
-fn client_worker(mut stream: TcpStream, chan: mpsc::SyncSender<RequestWrapper>) -> io::Result<()> {
+fn client_worker(mut stream: TcpStream, core: Arc<Mutex<Core>>) -> io::Result<()> {
     const BUFFER_SIZE_LIMIT: usize = 20 * 1 << 20;
     loop {
         let version = try!(stream.read_u8());
@@ -325,26 +320,45 @@ fn client_worker(mut stream: TcpStream, chan: mpsc::SyncSender<RequestWrapper>) 
             return Err(io::Error::new(io::ErrorKind::Other, err_msg));
         }
 
-        let (resp_tx, resp_rx) = mpsc::sync_channel(1);
-        chan.send(RequestWrapper {
-            response_queue: resp_tx,
-            req_type: req_type,
-            req_buf: req_buf,
-        }).unwrap();
-
-        let response = resp_rx.recv().unwrap();
+        let mut cursor = io::Cursor::new(req_buf);
+        let response = match req_type {
+            RequestType::EnqueueTrack => {
+                let req = proto::deserialize(&mut cursor).unwrap();
+                let resp = {
+                    let mut exc_core = core.lock().unwrap();
+                    exc_core.enqueue_track(req)
+                };
+                proto::serialize(&resp).unwrap()
+            },
+            RequestType::FastForward => {
+                let req = proto::deserialize(&mut cursor).unwrap();
+                let resp = {
+                    let mut exc_core = core.lock().unwrap();
+                    exc_core.fast_forward(req)
+                };
+                proto::serialize(&resp).unwrap()
+            },
+            RequestType::QueueStatus => {
+                let req = proto::deserialize(&mut cursor).unwrap();
+                let resp = {
+                    let mut exc_core = core.lock().unwrap();
+                    exc_core.queue_status(req)
+                };
+                proto::serialize(&resp).unwrap()
+            }
+        };
         try!(stream.write_u32::<BigEndian>(response.len() as u32));
         try!(stream.write_all(&response));
     }
 }
 
-fn client_acceptor(server: TcpListener, chan: mpsc::SyncSender<RequestWrapper>) {
+fn client_acceptor(server: TcpListener, core: Arc<Mutex<Core>>) {
     for stream in server.incoming() {
         match stream {
             Ok(stream) => {
-                let client_chan = chan.clone();
+                let client_core = core.clone();
                 thread::spawn(move || {
-                    if let Err(err) = client_worker(stream, client_chan) {
+                    if let Err(err) = client_worker(stream, client_core) {
                         info!("client disconnected with error: {:?}", err);
                     }
                 });
@@ -356,62 +370,13 @@ fn client_acceptor(server: TcpListener, chan: mpsc::SyncSender<RequestWrapper>) 
     }
 }
 
-struct CoreBinder<'a> {
-    core: &'a mut Core,
-}
-
-impl<'a> CoreBinder<'a> {
-    fn handle_command(&mut self, req_wr: RequestWrapper) {
-        info!("CoreBinder::handle_command");
-        let RequestWrapper {
-            response_queue: response_queue,
-            req_type: req_type,
-            req_buf: req_buf,
-        } = req_wr;
-        let response = match req_type {
-            RequestType::EnqueueTrack => {
-                self.enqueue_track(&req_buf)
-            },
-            RequestType::FastForward => {
-                self.fast_forward(&req_buf)
-            },
-            RequestType::QueueStatus => {
-                self.queue_status(&req_buf)
-            }
-        };
-        response_queue.send(response).unwrap();
-    }
-
-    fn enqueue_track(&mut self, req: &[u8]) -> Vec<u8> {
-        info!("CoreBinder::enqueue_track");
-        let mut cursor = io::Cursor::new(req.to_vec());
-        let req: EnqueueTrackRequest = proto::deserialize(&mut cursor).unwrap();
-        let resp = self.core.enqueue_track(req);
-        proto::serialize(&resp).unwrap()
-    }
-
-    fn fast_forward(&mut self, req: &[u8]) -> Vec<u8> {
-        info!("CoreBinder::fast_forward");
-        let mut cursor = io::Cursor::new(req.to_vec());
-        let req: FastForwardRequest = proto::deserialize(&mut cursor).unwrap();
-        let resp = self.core.fast_forward(req);
-        proto::serialize(&resp).unwrap()
-    }
-
-    fn queue_status(&mut self, req: &[u8]) -> Vec<u8> {
-        info!("CoreBinder::queue_status");
-        let mut cursor = io::Cursor::new(req.to_vec());
-        let req: StatusRequest = proto::deserialize(&mut cursor).unwrap();
-        let resp = self.core.queue_status(req);
-        proto::serialize(&resp).unwrap()
-    }
-}
-
 /// Connects to IceCast and holds references to streamable content.
 struct OutputManager {
     connector: IceCastWriter,
     cur_serial: u32,
     cur_sequence: u32,
+
+    steady_clock: SteadyTime,
     clock: OggClock,
 
     playing_offline: bool,
@@ -471,9 +436,9 @@ impl OutputManager {
         }
     }
 
-    fn copy_page(&mut self) {
+    // copy a page and tells us up to when we have no work to do
+    fn copy_page(&mut self) -> SteadyTime {
         let page = self.get_next_page();
-        self.clock.wait(&page).unwrap();
         self.connector.send_ogg_page(&page).unwrap();
 
         if let Some(playing) = self.playing.as_mut() {
@@ -484,6 +449,8 @@ impl OutputManager {
             page.position(),
             page.serial(),
             page.sequence());
+
+        SteadyTime::now() + self.clock.wait_duration(&page)
     }
 
     fn get_track_infos(&self) -> Vec<model::TrackInfo> {

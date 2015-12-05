@@ -1,7 +1,7 @@
 todo
 ====
 - [x] auto skip fallback
-- [ ] queue retrieval
+- [x] queue retrieval
 - [ ] queue manipulation
 - [ ] Live fallback replacement
 - [ ] DJ support
