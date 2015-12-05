@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::env;
 use std::process;
 
 use ::entrypoint::{self as ep, EntryPoint as EntryPointTrait};
@@ -37,11 +36,8 @@ fn get_entry_point(name: &str) -> Option<&'static ep::EntryPoint> {
 }
 
 fn main(args: Vec<OsString>) -> Result<(), ep::Error> {
-    let app_name = args[0].clone();
     assert_eq!(&args[1], "queue");
     let sub_command = args[2].clone().into_string().ok().unwrap();
-
-    let help_args = args.clone();
 
     if let Some(entry_pt) = get_entry_point(&sub_command) {
         return entry_pt.main(args);
@@ -52,7 +48,7 @@ fn main(args: Vec<OsString>) -> Result<(), ep::Error> {
 }
 
 fn print_usage(args: &[OsString]) {
-    for &(key, val) in ENTRY_POINT_MAP.iter() {
+    for &(_key, val) in ENTRY_POINT_MAP.iter() {
         val.print_usage(args);
     }
 }

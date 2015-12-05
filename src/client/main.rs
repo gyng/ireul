@@ -21,7 +21,7 @@ static ENTRY_POINT_MAP: &'static [(&'static str, &'static EntryPoint)] = &[
 ];
 
 fn print_usage(args: &[OsString]) {
-    for &(key, val) in ENTRY_POINT_MAP.iter() {
+    for &(_key, val) in ENTRY_POINT_MAP.iter() {
         val.print_usage(args);
     }
 }
@@ -37,7 +37,6 @@ fn get_entry_point(name: &str) -> Option<&'static EntryPoint> {
 
 fn main() {
     let args: Vec<OsString> = env::args_os().collect();
-    let app_name = args[0].clone();
     let sub_command = args[1].clone().into_string().ok().unwrap();
 
     let help_args = args.clone();

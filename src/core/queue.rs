@@ -149,6 +149,7 @@ impl PlayQueue {
         }
     }
 
+    #[allow(dead_code)] // queue manip stub
     pub fn reorder(&mut self, handle_ord: &[Handle]) {
         let old_items: VecDeque<Track> = mem::replace(&mut self.items, VecDeque::new());
 
@@ -164,6 +165,7 @@ impl PlayQueue {
         }
     }
 
+    #[allow(dead_code)] // queue manip stub
     pub fn remove_by_handle(&mut self, handle: Handle) {
         let old_items: VecDeque<Track> = mem::replace(&mut self.items, VecDeque::new());
         for item in old_items.into_iter() {
@@ -189,17 +191,6 @@ impl PlayQueue {
             },
             None => None,
         }
-    }
-
-    pub fn get_queue_comments_by_fields(&mut self, fields: &[&str]) -> Vec<Vec<(String, String)>> {
-        self.items.iter().map(|track| {
-            track.comments.comments.iter().filter_map(|comment|
-                match fields.iter().any(|&field| *field == comment.0) {
-                    true => Some(comment.clone()),
-                    false => None
-                }
-            ).collect()
-        }).collect()
     }
 
     pub fn track_infos(&self) -> Vec<model::TrackInfo> {

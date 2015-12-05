@@ -1,21 +1,19 @@
-use std::io::{self, Read, Write, BufRead, Seek, SeekFrom};
-use std::fs::{self, File};
+use std::io::{self, Read, Write};
+use std::fs::File;
 use std::ffi::OsString;
 use std::net::TcpStream;
 
-use byteorder::{self, ReadBytesExt, WriteBytesExt, BigEndian};
-
-use ogg::{OggTrackBuf, OggPageCheckError};
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+use ogg::{OggTrackBuf};
 
 use ireul_interface::proto;
 use ireul_interface::proxy::{
     RequestType,
     EnqueueTrackRequest,
     EnqueueTrackResult,
-    EnqueueTrackError,
 };
 
-use ::entrypoint::{self, Error as EntryPointError};
+use ::entrypoint::{Error as EntryPointError};
 
 pub struct EntryPoint;
 
@@ -56,7 +54,6 @@ impl ProgramArgs {
 
 
 fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
-    let app_name = args[0].clone();
     let args = try!(ProgramArgs::new(args));
 
     let mut file = io::BufReader::new(try!(File::open(&args.target_file)));
@@ -78,7 +75,7 @@ fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(RequestType::EnqueueTrack.to_op_code()));
 
-    let mut buf = proto::serialize(&req).unwrap();
+    let buf = proto::serialize(&req).unwrap();
     try!(conn.write_u32::<BigEndian>(buf.len() as u32));
     try!(conn.write_all(&buf));
 

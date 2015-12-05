@@ -1,11 +1,8 @@
-use std::io::{self, Read, Write, BufRead, Seek, SeekFrom};
-use std::fs::{self, File};
+use std::io::{self, Read, Write};
 use std::ffi::OsString;
 use std::net::TcpStream;
-use std::env;
-use std::process;
 
-use byteorder::{self, ReadBytesExt, WriteBytesExt, BigEndian};
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use ireul_interface::proto;
 use ireul_interface::proxy::RequestType;
@@ -30,12 +27,12 @@ impl ep::EntryPoint for EntryPoint {
     }
 }
 
-fn main(args: Vec<OsString>) -> Result<(), ep::Error> {
+fn main(_args: Vec<OsString>) -> Result<(), ep::Error> {
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(RequestType::QueueStatus.to_op_code()));
 
-    let mut buf = proto::serialize(&StatusRequest).unwrap();
+    let buf = proto::serialize(&StatusRequest).unwrap();
     try!(conn.write_u32::<BigEndian>(buf.len() as u32));
     try!(conn.write_all(&buf));
 

@@ -5,7 +5,6 @@ use std::ops;
 use std::str;
 use std::convert;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
-use std::io::{BufReader};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 
 use ::reader;

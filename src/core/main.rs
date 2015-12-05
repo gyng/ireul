@@ -14,12 +14,9 @@ extern crate time;
 
 use std::thread;
 use std::env;
-use std::fmt;
-use std::collections::HashSet;
-use std::sync::{self, Arc, Mutex};
-use std::sync::mpsc::{self};
+use std::sync::{Arc, Mutex};
 use std::net::{TcpStream, TcpListener};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::fs::File;
 
@@ -37,9 +34,7 @@ use ireul_interface::proxy::track::{
     StatusResult,
 };
 use ireul_interface::proxy::{
-    RequestWrapper,
     RequestType,
-    BinderError,
     EnqueueTrackRequest,
     EnqueueTrackError,
     EnqueueTrackResult,
@@ -116,18 +111,13 @@ fn main() {
     file.read_to_end(&mut buffer).unwrap();
     let offline_track = OggTrackBuf::new(buffer).unwrap();
 
-    let play_queue = PlayQueue::new(50);
-
     let output_manager = OutputManager {
         connector: connector,
         cur_serial: 0,
-        cur_sequence: 0,
-        // position: 0,
-        steady_clock: SteadyTime::now(),
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
-        play_queue: PlayQueue::new(10),
+        play_queue: PlayQueue::new(20),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
     };
@@ -202,21 +192,6 @@ fn update_serial(serial: u32, track: &mut OggTrack) {
     }
 }
 
-fn update_positions(start_pos: u64, track: &mut OggTrack) {
-    for page in track.pages_mut() {
-        let old_pos = page.position();
-        page.set_position(start_pos + old_pos);
-    }
-}
-
-fn final_position(track: &OggTrack) -> Option<u64> {
-    let mut position = None;
-    for page in track.pages() {
-        position = Some(page.position());
-    }
-    position
-}
-
 struct Core {
     output: OutputManager,
 }
@@ -227,7 +202,7 @@ impl Core {
     }
 
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
-        let EnqueueTrackRequest { mut track } = req;
+        let EnqueueTrackRequest { track } = req;
         {
             let mut pages = 0;
             let mut samples = 0;
@@ -257,7 +232,7 @@ impl Core {
             });
 
         if self.output.playing_offline {
-            self.output.fast_forward_track_boundary();
+            self.output.fast_forward_track_boundary().unwrap();
         }
 
         handle
@@ -374,9 +349,6 @@ fn client_acceptor(server: TcpListener, core: Arc<Mutex<Core>>) {
 struct OutputManager {
     connector: IceCastWriter,
     cur_serial: u32,
-    cur_sequence: u32,
-
-    steady_clock: SteadyTime,
     clock: OggClock,
 
     playing_offline: bool,
