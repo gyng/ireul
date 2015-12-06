@@ -505,6 +505,7 @@ module Ireul
 
   class QueueStatus
     attr_reader :queue
+    attr_reader :history
 
     def self.from_frame(buffer)
       hash = Ireul::_unpack_instance(buffer,
@@ -515,6 +516,7 @@ module Ireul
     def self.from_hash(hash)
       status = QueueStatus::allocate()
       status.instance_eval {
+        @history = hash[:history]
         @queue = Queue::wrap_tracks(hash[:upcoming]
           .map {|h| Track::from_hash(h) })
       }
@@ -627,11 +629,21 @@ module Ireul
   class QueueFormatter
     def format(queue)
       io = StringIO::new()
-      io.write("=== NOW PLAYING ===\n")
-      io.write("#{queue.current.start_time} :: #{queue.current.artist} - #{queue.current.title}\n")
-      io.write("=== UPCOMING ===\n")
-      for item in queue.upcoming
-        io.write("#{item.start_time} :: #{item.artist} - #{item.title}\n")
+      if queue.history != nil and queue.history.size > 0
+        io.write("=== HISTORY ===\n")
+        for item in queue.history
+          io.write("#{queue.current.artist} - #{queue.current.title}\n")
+        end
+      end
+      if not queue.current == nil
+        io.write("=== NOW PLAYING ===\n")
+        io.write("#{queue.current.start_time} :: #{queue.current.artist} - #{queue.current.title}\n")
+      end
+      if queue.upcoming != nil and queue.upcoming.size > 0
+        io.write("=== UPCOMING ===\n")
+        for item in queue.upcoming
+          io.write("#{item.start_time} :: #{item.artist} - #{item.title}\n")
+        end
       end
       io.string
     end

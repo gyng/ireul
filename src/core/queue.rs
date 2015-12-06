@@ -138,6 +138,7 @@ impl Track {
 pub struct PlayQueue {
     halloc: HandleAllocator<ChaChaRng>,
     items: VecDeque<Track>,
+    history: VecDeque<model::TrackInfo>,
 }
 
 impl PlayQueue {
@@ -146,6 +147,7 @@ impl PlayQueue {
         PlayQueue {
             halloc: HandleAllocator::new(rng, limit),
             items: VecDeque::new(),
+            history: VecDeque::new(),
         }
     }
 
@@ -197,6 +199,17 @@ impl PlayQueue {
         self.items.iter()
             .map(Track::get_track_info)
             .collect()
+    }
+
+    pub fn add_history(&mut self, tinfo: model::TrackInfo) {
+        self.history.push_front(tinfo);
+        while 10 < self.history.len() {
+            self.history.pop_back();
+        }
+    }
+
+    pub fn get_history(&self) -> Vec<model::TrackInfo> {
+        self.history.iter().cloned().collect()
     }
 }
 

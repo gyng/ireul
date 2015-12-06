@@ -151,14 +151,14 @@ impl Serialize for TrackInfo {
     }
 }
 
-const QUEUE_FIELD_COUNT: u32 = 1;
+const QUEUE_FIELD_COUNT: u32 = 2;
 
 #[derive(Debug)]
 pub struct Queue {
-    // history: Vec<TrackInfo>,
     // We'll just include the currently playing song
     // in here.
     pub upcoming: Vec<TrackInfo>,
+    pub history: Vec<TrackInfo>,
 }
 
 impl Deserialize for Queue {
@@ -167,12 +167,17 @@ impl Deserialize for Queue {
         let field_count = try!(buf.read_u32::<BigEndian>());
 
         let mut upcoming: Option<Vec<TrackInfo>> = None;
+        let mut history: Option<Vec<TrackInfo>> = None;
+
         for _ in 0..field_count {
             let field_name: String = try!(Deserialize::read(buf));
             match &field_name[..] {
                 "upcoming" => {
                     upcoming = Some(try!(Deserialize::read(buf)));
                 },
+                "history" => {
+                    history = Some(try!(Deserialize::read(buf)));
+                }
                 _ => try!(proto::skip_entity(buf)),
             }
         }
@@ -181,9 +186,11 @@ impl Deserialize for Queue {
             Some(upcoming) => upcoming,
             None => return Err(io::Error::new(io::ErrorKind::Other, "missing field: upcoming")),
         };
+        let history = history.unwrap_or_else(Vec::new);
 
         Ok(Queue {
             upcoming: upcoming,
+            history: history,
         })
     }
 }
@@ -195,6 +202,9 @@ impl Serialize for Queue {
 
         try!(Serialize::write("upcoming", buf));
         try!(Serialize::write(&self.upcoming[..], buf));
+
+        try!(Serialize::write("history", buf));
+        try!(Serialize::write(&self.history[..], buf));
 
         Ok(())
     }

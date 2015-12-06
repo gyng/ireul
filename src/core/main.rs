@@ -298,6 +298,10 @@ impl Core {
         let track: queue::Track = match self.play_queue.pop_track() {
             Some(track) => {
                 self.playing_offline = false;
+
+                if let Some(was_playing) = self.playing.take() {
+                    self.play_queue.add_history(was_playing);
+                }
                 self.playing = Some(track.get_track_info());
                 track
             },
@@ -388,8 +392,10 @@ impl Core {
             upcoming.push(playing.clone());
         }
         upcoming.extend(self.play_queue.track_infos().into_iter());
+
         Ok(model::Queue {
             upcoming: upcoming,
+            history: self.play_queue.get_history(),
         })
     }
 
