@@ -111,7 +111,8 @@ fn main() {
     file.read_to_end(&mut buffer).unwrap();
     let offline_track = OggTrackBuf::new(buffer).unwrap();
 
-    let output_manager = OutputManager {
+    let control = TcpListener::bind("0.0.0.0:3001").unwrap();
+    let core = Arc::new(Mutex::new(Core {
         connector: connector,
         cur_serial: 0,
         clock: OggClock::new(48000),
@@ -120,13 +121,8 @@ fn main() {
         play_queue: PlayQueue::new(20),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
-    };
-
-    let control = TcpListener::bind("0.0.0.0:3001").unwrap();
-
-    let core = Core::new(output_manager);
-    let core = Arc::new(Mutex::new(core));
-
+    }));
+    
     let client_core = core.clone();
     thread::spawn(move || {
         client_acceptor(control, client_core.clone());
@@ -189,68 +185,6 @@ fn check_sample_rate(req: u32, track: &OggTrack) -> Result<(), ()> {
 fn update_serial(serial: u32, track: &mut OggTrack) {
     for page in track.pages_mut() {
         page.set_serial(serial);
-    }
-}
-
-struct Core {
-    output: OutputManager,
-}
-
-impl Core {
-    fn new(om: OutputManager) -> Core {
-        Core { output: om }
-    }
-
-    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
-        let EnqueueTrackRequest { track } = req;
-        {
-            let mut pages = 0;
-            let mut samples = 0;
-            for page in track.pages() {
-                pages += 1;
-                samples = page.position();
-            }
-
-            info!("a client sent {} samples in {} pages", samples, pages);
-        }
-        if track.as_u8_slice().len() == 0 {
-            return Err(EnqueueTrackError::InvalidTrack);
-        }
-
-        try!(validate_positions(&track)
-            .map_err(|()| EnqueueTrackError::InvalidTrack));
-
-        try!(validate_comment_section(&track)
-            .map_err(|()| EnqueueTrackError::InvalidTrack));
-
-        try!(check_sample_rate(self.output.clock.sample_rate(), &track)
-            .map_err(|()| EnqueueTrackError::BadSampleRate));
-
-        let handle = self.output.play_queue.add_track(track.as_ref())
-            .map_err(|err| match err {
-                PlayQueueError::Full => EnqueueTrackError::Full,
-            });
-
-        if self.output.playing_offline {
-            self.output.fast_forward_track_boundary().unwrap();
-        }
-
-        handle
-    }
-
-    fn fast_forward(&mut self, req: FastForwardRequest) -> FastForwardResult {
-        try!(self.output.fast_forward(req.kind));
-        Ok(())
-    }
-
-    fn queue_status(&mut self, _req: StatusRequest) -> StatusResult {
-        Ok(model::Queue {
-            upcoming: self.output.get_track_infos(),
-        })
-    }
-
-    fn tick(&mut self) -> SteadyTime {
-        self.output.copy_page()
     }
 }
 
@@ -346,19 +280,20 @@ fn client_acceptor(server: TcpListener, core: Arc<Mutex<Core>>) {
 }
 
 /// Connects to IceCast and holds references to streamable content.
-struct OutputManager {
+struct Core {
     connector: IceCastWriter,
     cur_serial: u32,
     clock: OggClock,
 
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
+
     play_queue: PlayQueue,
     offline_track: queue::Track,
     playing: Option<model::TrackInfo>,
 }
 
-impl OutputManager {
+impl Core {
     fn fill_buffer(&mut self) {
         let track: queue::Track = match self.play_queue.pop_track() {
             Some(track) => {
@@ -400,16 +335,66 @@ impl OutputManager {
         Ok(())
     }
 
-    fn fast_forward(&mut self, kind: FastForward) -> FastForwardResult {
-        match kind {
+    // **
+    fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
+        let EnqueueTrackRequest { track } = req;
+        {
+            let mut pages = 0;
+            let mut samples = 0;
+            for page in track.pages() {
+                pages += 1;
+                samples = page.position();
+            }
+
+            info!("a client sent {} samples in {} pages", samples, pages);
+        }
+        if track.as_u8_slice().len() == 0 {
+            return Err(EnqueueTrackError::InvalidTrack);
+        }
+
+        try!(validate_positions(&track)
+            .map_err(|()| EnqueueTrackError::InvalidTrack));
+
+        try!(validate_comment_section(&track)
+            .map_err(|()| EnqueueTrackError::InvalidTrack));
+
+        try!(check_sample_rate(self.clock.sample_rate(), &track)
+            .map_err(|()| EnqueueTrackError::BadSampleRate));
+
+        let handle = self.play_queue.add_track(track.as_ref())
+            .map_err(|err| match err {
+                PlayQueueError::Full => EnqueueTrackError::Full,
+            });
+
+        if self.playing_offline {
+            self.fast_forward_track_boundary().unwrap();
+        }
+
+        handle
+    }
+
+    fn fast_forward(&mut self, req: FastForwardRequest) -> FastForwardResult {
+        match req.kind {
             FastForward::TrackBoundary => {
-                self.fast_forward_track_boundary()
+                try!(self.fast_forward_track_boundary());
+                Ok(())
             }
         }
     }
 
+    fn queue_status(&mut self, _req: StatusRequest) -> StatusResult {
+        let mut upcoming: Vec<model::TrackInfo> = Vec::new();
+        if let Some(ref playing) = self.playing {
+            upcoming.push(playing.clone());
+        }
+        upcoming.extend(self.play_queue.track_infos().into_iter());
+        Ok(model::Queue {
+            upcoming: upcoming,
+        })
+    }
+
     // copy a page and tells us up to when we have no work to do
-    fn copy_page(&mut self) -> SteadyTime {
+    fn tick(&mut self) -> SteadyTime {
         let page = self.get_next_page();
         self.connector.send_ogg_page(&page).unwrap();
 
@@ -425,14 +410,7 @@ impl OutputManager {
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
 
-    fn get_track_infos(&self) -> Vec<model::TrackInfo> {
-        let mut out: Vec<model::TrackInfo> = Vec::new();
-        if let Some(ref playing) = self.playing {
-            out.push(playing.clone());
-        }
-        out.extend(self.play_queue.track_infos().into_iter());
-        out
-    }
+
 }
 
 fn page_starts_track(page: &OggPage) -> bool {
