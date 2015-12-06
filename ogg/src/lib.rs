@@ -353,14 +353,6 @@ impl OggPage {
         Ok(&buf[0..page_length])
     }
 
-    fn measure_whole_mut(buf: &mut [u8]) -> Result<&mut [u8], OggPageCheckError> {
-        let page_length = {
-            let (hbuf, bbuf) = try!(OggPage::measure(buf));
-            hbuf.len() + bbuf.len()
-        };
-        Ok(&mut buf[0..page_length])
-    }
-
     pub fn position(&self) -> u64 {
         let self_buf = self.as_u8_slice();
         let mut cur = Cursor::new(&self_buf[POSITION_OFFSET..POSITION_OFFSET+8]);
@@ -438,7 +430,7 @@ impl OggPage {
 
     pub fn body(&self) -> &[u8] {
         let slice: &[u8] = self.as_u8_slice();
-        let (header, body) = OggPage::measure(slice).unwrap();
+        let (_header, body) = OggPage::measure(slice).unwrap();
         body
     }
 

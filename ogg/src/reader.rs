@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use byteorder::{ByteOrder, ReadBytesExt};
 
 pub enum Error {
     Truncated,

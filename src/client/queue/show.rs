@@ -5,21 +5,20 @@ use std::net::TcpStream;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
 use ireul_interface::proto;
-use ireul_interface::proxy::{
-    RequestType,
-    FastForwardRequest,
-    FastForward,
-    FastForwardResult,
+use ireul_interface::proxy::RequestType;
+use ireul_interface::proxy::track::{
+    StatusRequest,
+    StatusResult,
 };
 
-use ::entrypoint::{Error as EntryPointError};
+use ::entrypoint as ep;
 
 pub struct EntryPoint;
 
 unsafe impl Sync for EntryPoint {}
 
-impl ::entrypoint::EntryPoint for EntryPoint {
-    fn main(&self, args: Vec<OsString>) -> Result<(), EntryPointError> {
+impl ep::EntryPoint for EntryPoint {
+    fn main(&self, args: Vec<OsString>) -> Result<(), ep::Error> {
         main(args)
     }
 
@@ -28,16 +27,12 @@ impl ::entrypoint::EntryPoint for EntryPoint {
     }
 }
 
-fn main(_args: Vec<OsString>) -> Result<(), EntryPointError> {
+fn main(_args: Vec<OsString>) -> Result<(), ep::Error> {
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
-
     try!(conn.write_u8(0));
-    try!(conn.write_u32::<BigEndian>(RequestType::FastForward.to_op_code()));
+    try!(conn.write_u32::<BigEndian>(RequestType::QueueStatus.to_op_code()));
 
-    let req = FastForwardRequest {
-        kind: FastForward::TrackBoundary,
-    };
-    let buf = proto::serialize(&req).unwrap();
+    let buf = proto::serialize(&StatusRequest).unwrap();
     try!(conn.write_u32::<BigEndian>(buf.len() as u32));
     try!(conn.write_all(&buf));
 
@@ -49,17 +44,18 @@ fn main(_args: Vec<OsString>) -> Result<(), EntryPointError> {
     }
 
     let mut frame = io::Cursor::new(resp_buf);
-    let res: FastForwardResult = proto::deserialize(&mut frame).unwrap();
+    let res: StatusResult = proto::deserialize(&mut frame).unwrap();
     println!("got response: {:?}", res);
 
     try!(conn.write_u8(0));
     try!(conn.write_u32::<BigEndian>(0));
+
     Ok(())
 }
 
 fn print_usage(args: &[OsString]) {
-    println!("{} fast-forward", args[0].clone().into_string().ok().unwrap());
+    println!("{} queue show", args[0].clone().into_string().ok().unwrap());
     println!("");
-    println!("    Skips the currently-playing track");
+    println!("    Shows the current queue");
     println!("");
 }

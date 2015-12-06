@@ -1,5 +1,7 @@
 mod enqueue;
 mod fast_forward;
+pub mod model;
+mod status;
 
 pub use self::enqueue::{
     EnqueueTrackRequest,
@@ -12,4 +14,10 @@ pub use self::fast_forward::{
     FastForwardRequest,
     FastForwardResult,
     FastForwardError,
+};
+
+pub use self::status::{
+    StatusRequest,
+    StatusResult,
+    StatusError,
 };

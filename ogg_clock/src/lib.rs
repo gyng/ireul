@@ -61,6 +61,17 @@ impl OggClock {
         self.clock.sample_rate()
     }
 
+    pub fn wait_duration(&mut self, page: &OggPage) -> Duration {
+        let new_pos = page.position();
+        if self.base_pos + new_pos < self.last_pos {
+            self.base_pos = self.last_pos;
+        }
+
+        let abs_pos = self.base_pos + new_pos;
+        self.last_pos = abs_pos;
+        self.clock.wait_delay(SteadyTime::now(), abs_pos)
+    }
+
     pub fn wait(&mut self, page: &OggPage) -> Result<(), ()> {
         let new_pos = page.position();
         if self.base_pos + new_pos < self.last_pos {

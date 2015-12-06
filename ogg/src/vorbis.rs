@@ -5,7 +5,6 @@ use std::ops;
 use std::str;
 use std::convert;
 use std::borrow::{Borrow, BorrowMut, ToOwned};
-use std::io::{BufReader};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 
 use ::reader;
@@ -117,10 +116,6 @@ impl VorbisHeader {
     }
 
     pub fn as_u8_slice(&self) -> &[u8] {
-        unsafe { mem::transmute(self) }
-    }
-
-    fn as_u8_slice_mut(&mut self) -> &mut [u8] {
         unsafe { mem::transmute(self) }
     }
 
@@ -294,6 +289,7 @@ pub struct IdentificationHeader {
     pub blocksize_1: u8,
 }
 
+#[derive(Clone)]
 pub struct Comments {
     pub vendor: String,
     pub comments: Vec<(String, String)>
