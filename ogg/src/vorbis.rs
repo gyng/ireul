@@ -119,10 +119,6 @@ impl VorbisHeader {
         unsafe { mem::transmute(self) }
     }
 
-    fn as_u8_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { mem::transmute(self) }
-    }
-
     pub fn find_identification<'a, I>(iter: I) -> Result<&'a VorbisHeader, ()>
         where I: Iterator<Item=&'a OggPage>
     {
