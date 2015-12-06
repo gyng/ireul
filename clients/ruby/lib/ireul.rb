@@ -516,7 +516,7 @@ module Ireul
     def self.from_hash(hash)
       status = QueueStatus::allocate()
       status.instance_eval {
-        @history = hash[:history]
+        @history = hash[:history].map {|h| Track::from_hash(h) }
         @queue = Queue::wrap_tracks(hash[:upcoming]
           .map {|h| Track::from_hash(h) })
       }
@@ -632,7 +632,7 @@ module Ireul
       if queue.history != nil and queue.history.size > 0
         io.write("=== HISTORY ===\n")
         for item in queue.history
-          io.write("#{queue.current.artist} - #{queue.current.title}\n")
+          io.write("#{item.artist} - #{item.title}\n")
         end
       end
       if not queue.current == nil
