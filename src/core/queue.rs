@@ -202,9 +202,9 @@ impl PlayQueue {
     }
 
     pub fn add_history(&mut self, tinfo: model::TrackInfo) {
-        self.history.push_front(tinfo);
+        self.history.push_back(tinfo);
         while 10 < self.history.len() {
-            self.history.pop_back();
+            self.history.pop_front();
         }
     }
 
