@@ -203,35 +203,3 @@ impl PlayQueue {
 pub enum PlayQueueError {
     Full,
 }
-
-#[cfg(test)]
-mod test {
-    use ogg::OggTrack;
-    use super::PlayQueue;
-
-    static SAMPLE_OGG: &'static [u8] = include_bytes!("../../ogg/testdata/Hydrate-Kenny_Beltrey.ogg");
-
-    #[test]
-    fn test_get_queue_comments_by_fields() {
-        let mut queue = PlayQueue::new(2);
-        let track1 = OggTrack::new(SAMPLE_OGG).unwrap();
-        let track2 = OggTrack::new(SAMPLE_OGG).unwrap();
-
-        queue.add_track(&track1).ok();
-        queue.add_track(&track2).ok();
-
-        let expected = vec!(
-            vec!(
-                ("TITLE".to_string(), "Hydrate - Kenny Beltrey".to_string()),
-                ("ARTIST".to_string(), "Kenny Beltrey".to_string())
-            ),
-            vec!(
-                ("TITLE".to_string(), "Hydrate - Kenny Beltrey".to_string()),
-                ("ARTIST".to_string(), "Kenny Beltrey".to_string())
-            )
-        );
-
-        let got = queue.get_queue_comments_by_fields(&["ARTIST", "TITLE", "NOTAFIELD"]);
-        assert_eq!(expected, got);
-    }
-}
