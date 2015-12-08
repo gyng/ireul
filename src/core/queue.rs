@@ -188,7 +188,7 @@ impl PlayQueue {
     pub fn pop_track(&mut self) -> Option<Track> {
         match self.items.pop_front() {
             Some(track) => {
-                self.halloc.dispose(track.handle).unwrap();
+                self.add_history(track.get_track_info());
                 Some(track)
             },
             None => None,
@@ -201,15 +201,16 @@ impl PlayQueue {
             .collect()
     }
 
-    pub fn add_history(&mut self, tinfo: model::TrackInfo) {
+    fn add_history(&mut self, tinfo: model::TrackInfo) {
         self.history.push_back(tinfo);
         while 10 < self.history.len() {
-            self.history.pop_front();
+            let track = self.history.pop_front().unwrap();
+            self.halloc.dispose(track.handle).unwrap();
         }
     }
 
     pub fn get_history(&self) -> Vec<model::TrackInfo> {
-        self.history.iter().cloned().collect()
+        self.history.iter().skip(1).cloned().collect()
     }
 }
 

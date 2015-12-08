@@ -122,7 +122,7 @@ fn main() {
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
     }));
-    
+
     let client_core = core.clone();
     thread::spawn(move || {
         client_acceptor(control, client_core.clone());
@@ -298,10 +298,6 @@ impl Core {
         let track: queue::Track = match self.play_queue.pop_track() {
             Some(track) => {
                 self.playing_offline = false;
-
-                if let Some(was_playing) = self.playing.take() {
-                    self.play_queue.add_history(was_playing);
-                }
                 self.playing = Some(track.get_track_info());
                 track
             },
