@@ -67,13 +67,14 @@ struct Config {
 }
 
 impl Config {
-    fn icecast_writer_opts(&self) -> Result<IceCastWriterOptions, String> {
+    fn icecast_url(&self) -> Result<url::Url, String> {
         let url = try!(url::Url::parse(&self.icecast_url)
             .map_err(|err| format!("Malformed URL: {:?}", err)));
+        Ok(url)
+    }
 
-        let mut opts = try!(IceCastWriterOptions::from_url(&url)
-            .map_err(|err| format!("Unacceptable URL: {:?}", err)));
-
+    fn icecast_writer_opts(&self) -> Result<IceCastWriterOptions, String> {
+        let mut opts = IceCastWriterOptions::default();
         if let Some(ref metadata) = self.metadata {
             if let Some(ref name) = metadata.name {
                 opts.set_name(name);
@@ -97,15 +98,18 @@ fn main() {
     env_logger::init().unwrap();
 
     let config_file = env::args_os().nth(1).unwrap();
+
     let config: Config = {
         let mut reader = File::open(&config_file).expect("failed to open config file");
         let mut config_buf = String::new();
         reader.read_to_string(&mut config_buf).expect("failed to read config");
         toml::decode_str(&config_buf).expect("invalid config file")
     };
-    let icecast_options = config.icecast_writer_opts().unwrap();
 
-    let connector = IceCastWriter::new(icecast_options).unwrap();
+    let icecast_url = config.icecast_url().unwrap();
+    let icecast_options = config.icecast_writer_opts().unwrap();
+    let connector = IceCastWriter::with_options(&icecast_url, icecast_options).unwrap();
+
     let mut file = File::open("howbigisthis.ogg").unwrap();
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();
@@ -398,7 +402,9 @@ impl Core {
     // copy a page and tells us up to when we have no work to do
     fn tick(&mut self) -> SteadyTime {
         let page = self.get_next_page();
-        self.connector.send_ogg_page(&page).unwrap();
+        if let Err(err) = self.connector.send_ogg_page(&page) {
+            //
+        }
 
         if let Some(playing) = self.playing.as_mut() {
             playing.sample_position = page.position();

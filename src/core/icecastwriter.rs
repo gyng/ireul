@@ -10,11 +10,7 @@ use ogg::OggPage;
 // https://gist.github.com/ePirat/adc3b8ba00d85b7e3870#specifying-mountpoint-information
 #[derive(Debug)]
 pub struct IceCastWriterOptions {
-    host: String,
-    port: u16,
-    mount: String, // should start with a `/` eg. `/mymount.ogg`
-    user: Option<String>,
-    password: Option<String>,
+    public: bool,
     name: Option<String>,
     description: Option<String>,
     url: Option<String>,
@@ -22,82 +18,6 @@ pub struct IceCastWriterOptions {
 }
 
 impl IceCastWriterOptions {
-    pub fn from_url(url: &url::Url) -> Result<IceCastWriterOptions, &'static str> {
-        if url.scheme != "http" {
-            return Err("scheme must be http");
-        }
-
-        let mut opts = IceCastWriterOptions::default();
-        if let Some(domain) = url.domain() {
-            opts.set_host(domain);
-        }
-        if let Some(port) = url.port() {
-            opts.set_port(port);
-        }
-        if let Some(ref path) = url.serialize_path() {
-            opts.set_mount(path);
-        }
-        if let Some(user) = url.username() {
-            opts.set_user(user);
-        }
-        if let Some(password) = url.password() {
-            opts.set_password(password);
-        }
-        Ok(opts)
-    }
-
-    pub fn set_host(&mut self, host: &str) -> &mut Self {
-        self.host = host.to_string();
-        self
-    }
-
-    pub fn set_port(&mut self, port: u16) -> &mut Self {
-        self.port = port;
-        self
-    }
-
-    fn endpoint(&self) -> (&str, u16) {
-        (&self.host, self.port)
-    }
-
-    fn endpoint_name(&self) -> String {
-        format!("{}:{}", self.host, self.port)
-    }
-
-    pub fn set_mount(&mut self, mount: &str) -> &mut Self {
-        self.mount = mount.to_string();
-        self
-    }
-
-    pub fn set_user(&mut self, user: &str) -> &mut Self {
-        self.user = Some(user.to_string());
-        self
-    }
-
-    pub fn set_password(&mut self, password: &str) -> &mut Self {
-        self.password = Some(password.to_string());
-        self
-    }
-
-    fn get_userpass(&self) -> Option<String> {
-        let mut buf = String::new();
-        let mut emit = false;
-        if let Some(ref user) = self.user {
-            emit = true;
-            buf.push_str(user);
-        }
-        if let Some(ref password) = self.password {
-            buf.push_str(":");
-            buf.push_str(password);
-            emit = true;
-        }
-        if emit {
-            Some(buf)
-        } else {
-            None
-        }
-    }
-
     pub fn set_name(&mut self, name: &str) -> &mut Self {
         self.name = Some(name.to_string());
         self
@@ -122,11 +42,7 @@ impl IceCastWriterOptions {
 impl Default for IceCastWriterOptions {
     fn default() -> IceCastWriterOptions {
         IceCastWriterOptions {
-            host: "127.0.0.1".to_string(),
-            port: 8000,
-            mount: "/mountpoint.ogg".to_string(),
-            user: None,
-            password: None,
+            public: false,
             name: None,
             description: None,
             url: None,
@@ -140,54 +56,63 @@ pub struct IceCastWriter {
     options: IceCastWriterOptions,
 }
 
+
 impl IceCastWriter {
-    pub fn new(options: IceCastWriterOptions) -> io::Result<IceCastWriter> {
-        // IceCast drops connection if mountpoint does not begin with `/`
-        assert!(options.mount.as_bytes()[0] == b'/');
+    #[allow(dead_code)]
+    pub fn new(url: &url::Url) -> io::Result<IceCastWriter> {
+        IceCastWriter::with_options(url, IceCastWriterOptions::default())
+    }
 
-        let stream = match TcpStream::connect(options.endpoint()) {
-            Ok(stream) => stream,
-            Err(err) => return Err(err)
-        };
+    pub fn with_options(url: &url::Url, opts: IceCastWriterOptions) -> io::Result<IceCastWriter> {
+        let endpoint = try!(get_endpoint(url).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "Missing hostname in URL")
+        }));
 
+        let stream = try!(TcpStream::connect(&endpoint[..]));
         let mut writer = IceCastWriter {
             stream: stream,
-            options: options,
+            options: opts
         };
-
-        try!(writer.send_header());
-
+        try!(writer.send_header(url));
         Ok(writer)
     }
 
-    fn send_header(&mut self) -> io::Result<()> {
-        try!(write!(self.stream, "SOURCE {} HTTP/1.0\r\n", self.options.mount));
+    fn send_header(&mut self, url: &url::Url) -> io::Result<()> {
+        let options = &self.options;
 
-        if let Some(ref user_pass) = self.options.get_userpass() {
-            let mut config = MIME;
-            config.line_length = None;
-            try!(write!(self.stream, "Authorization: Basic {}\r\n", user_pass.as_bytes().to_base64(config)));
+        let mount = try!(url.serialize_path().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "Missing path in URL")
+        }));
+        try!(write!(self.stream, "SOURCE {} HTTP/1.0\r\n", mount));
+
+        if let Some(userpass) = get_authorization_header(url) {
+            try!(write!(self.stream, "{}\r\n", userpass));
+        }
+        if let Some(host) = get_host_header(url) {
+            // TODO: Verify this
+            try!(write!(self.stream, "{}\r\n", host));
         }
 
-
-        try!(write!(self.stream, "Host: {}\r\n", self.options.endpoint_name())); // TODO: Verify this
         try!(write!(self.stream, "Accept: */*"));
         try!(write!(self.stream, "User-Agent: ireul\r\n"));
-        try!(write!(self.stream, "Ice-Public: 1\r\n"));
 
-        if let Some(ref name) = self.options.name {
+        if options.public {
+            try!(write!(self.stream, "Ice-Public: 1\r\n"));
+        }
+
+        if let Some(ref name) = options.name {
             try!(write!(self.stream, "Ice-Name: {}\r\n", name));
         }
 
-        if let Some(ref description) = self.options.description {
+        if let Some(ref description) = options.description {
             try!(write!(self.stream, "Ice-Description: {}\r\n", description));
         }
 
-        if let Some(ref url) = self.options.url {
+        if let Some(ref url) = options.url {
             try!(write!(self.stream, "Ice-Url: {}\r\n", url));
         }
 
-        if let Some(ref genre) = self.options.genre {
+        if let Some(ref genre) = options.genre {
             try!(write!(self.stream, "Ice-Genre: {}\r\n", genre));
         }
 
@@ -200,5 +125,48 @@ impl IceCastWriter {
 
     pub fn send_ogg_page(&mut self, page: &OggPage) -> io::Result<()> {
         self.stream.write_all(page.as_u8_slice())
+    }
+}
+
+fn get_endpoint(url: &url::Url) -> Option<String> {
+    match (url.domain(), url.port()) {
+        (None, _) => None,
+        (Some(domain), None) => {
+            Some(format!("{}:8000", domain))
+        }
+        (Some(domain), Some(port)) => {
+            Some(format!("{}:{}", domain, port))
+        }
+    }
+}
+
+fn get_host_header(url: &url::Url) -> Option<String> {
+    match get_endpoint(url) {
+        None => None,
+        Some(endpoint) => Some(format!("Host: {}", endpoint)),
+    }
+}
+
+fn get_authorization_header(url: &url::Url) -> Option<String> {
+    let mut emit = false;
+    let mut userpass = String::new();
+
+    if let Some(user) = url.username() {
+        emit = true;
+        userpass.push_str(user);
+    }
+    if let Some(password) = url.password() {
+        emit = true;
+        userpass.push_str(":");
+        userpass.push_str(password);
+    }
+
+    let mut config = MIME;
+    config.line_length = None;
+    let userpass_b64 = userpass.as_bytes().to_base64(config);
+
+    match emit {
+        true => Some(format!("Authorization: Basic {}", userpass_b64)),
+        false => None,
     }
 }
