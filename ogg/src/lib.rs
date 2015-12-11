@@ -251,6 +251,22 @@ impl OggPageBuf {
         Ok(OggPageBuf { inner: buf })
     }
 
+    pub fn empty() -> OggPageBuf {
+        let empty_page = [
+            b'O', b'g', b'g', b'S', // capture
+            0, // version
+            0, // header type
+            0, 0, 0, 0, 0, 0, 0, 0, // granule position
+            0, 0, 0, 0, // bitstream serial number
+            0, 0, 0, 0, // page seq number
+            0x11, 0xA5, 0xA1, 0x9E, // checksum
+            0, // page segments lengths
+        ].to_vec();
+
+        debug_assert!(OggPage::new(&empty_page[..]).is_ok());
+        OggPageBuf { inner: empty_page.to_vec() }
+    }
+
     pub fn into_cow(self) -> Cow<'static, OggPage> {
         Cow::Owned(self)
     }
@@ -374,6 +390,43 @@ impl OggPage {
         let mut tx = self.begin();
         tx.set_serial(serial);
     }
+
+    pub fn continued(&self) -> bool {
+        const FLAG: u8 = 0x01;
+
+        let self_buf = self.as_u8_slice();
+        (self_buf[5] & FLAG) > 0
+    }
+
+    pub fn set_continued(&mut self, value: bool) {
+        let mut tx = self.begin();
+        tx.set_continued(value);
+    }
+
+    pub fn bos(&self) -> bool {
+        const FLAG: u8 = 0x02;
+
+        let self_buf = self.as_u8_slice();
+        (self_buf[5] & FLAG) > 0
+    }
+
+    pub fn set_bos(&mut self, value: bool) {
+        let mut tx = self.begin();
+        tx.set_bos(value);
+    }
+
+    pub fn eos(&self) -> bool {
+        const FLAG: u8 = 0x04;
+
+        let self_buf = self.as_u8_slice();
+        (self_buf[5] & FLAG) > 0
+    }
+
+    pub fn set_eos(&mut self, value: bool) {
+        let mut tx = self.begin();
+        tx.set_eos(value);
+    }
+
 
     pub fn sequence(&self) -> u32 {
         let self_buf = self.as_u8_slice();
@@ -517,6 +570,37 @@ impl<'a> ChecksumGuard<'a> {
         let seq_slice = &mut self_buf[SEQUENCE_OFFSET..SEQUENCE_OFFSET+4];
         LittleEndian::write_u32(seq_slice, sequence);
     }
+
+    pub fn set_continued(&mut self, value: bool) {
+        const FLAG: u8 = 0x01;
+
+        let self_buf = self.page.as_u8_slice_mut();
+        let header_value = self_buf[5] & (0xFF ^ FLAG);
+        let add_this = if value { FLAG } else { 0x00 };
+        self_buf[5] = header_value | add_this;
+    }
+
+    pub fn set_bos(&mut self, value: bool) {
+        const FLAG: u8 = 0x02;
+
+        let self_buf = self.page.as_u8_slice_mut();
+        let header_value = self_buf[5] & (0xFF ^ FLAG);
+        let add_this = if value { FLAG } else { 0x00 };
+        self_buf[5] = header_value | add_this;
+    }
+
+    pub fn set_eos(&mut self, value: bool) {
+        const FLAG: u8 = 0x04;
+
+        let self_buf = self.page.as_u8_slice_mut();
+        let header_value = self_buf[5] & (0xFF ^ FLAG);
+        let add_this = if value { FLAG } else { 0x00 };
+        self_buf[5] = header_value | add_this;
+    }
+
+    pub fn scoped<F>(self, func: F) where F: Fn(ChecksumGuard<'a>) {
+        func(self)
+    }
 }
 
 impl<'a> Drop for ChecksumGuard<'a> {
@@ -525,6 +609,9 @@ impl<'a> Drop for ChecksumGuard<'a> {
     }
 }
 
+pub struct OggPageBuilder {
+    packets: Vec<Vec<u8>>,
+}
 
 pub struct Recapture([u8; 4]);
 
@@ -549,7 +636,7 @@ impl Recapture {
 
 #[cfg(test)]
 mod tests {
-    use super::{OggTrack, Recapture};
+    use super::{OggTrack, OggPageBuf, Recapture};
 
     static SAMPLE_OGG: &'static [u8] = include_bytes!("../testdata/Hydrate-Kenny_Beltrey.ogg");
 
@@ -597,5 +684,10 @@ mod tests {
         assert!(page1packets.next().unwrap().starts_with(b"\x05vorbis"));
         assert!(page1packets.next().is_none());
 
+    }
+
+    #[test]
+    fn test_ogg_page_buf() {
+        let _ = OggPageBuf::empty();
     }
 }

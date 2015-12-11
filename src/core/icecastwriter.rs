@@ -8,7 +8,7 @@ use ogg::OggPage;
 
 // TODO: Move mountpoint information into some serializable thing
 // https://gist.github.com/ePirat/adc3b8ba00d85b7e3870#specifying-mountpoint-information
-#[derive(Debug)]
+#[derive(RustcDecodable, Clone, Debug)]
 pub struct IceCastWriterOptions {
     public: bool,
     name: Option<String>,

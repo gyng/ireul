@@ -14,6 +14,7 @@ extern crate time;
 
 use std::thread;
 use std::env;
+use std::mem;
 use std::sync::{Arc, Mutex};
 use std::net::{TcpStream, TcpListener};
 use std::collections::VecDeque;
@@ -122,6 +123,11 @@ fn main() {
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
+
+        prev_ogg_granule_pos: 0,
+        prev_ogg_serial: 0,
+        prev_ogg_sequence: 0,
+
         play_queue: PlayQueue::new(20),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
@@ -292,6 +298,10 @@ struct Core {
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
 
+    prev_ogg_granule_pos: u64,
+    prev_ogg_serial: u32,
+    prev_ogg_sequence: u32,
+
     play_queue: PlayQueue,
     offline_track: queue::Track,
     playing: Option<model::TrackInfo>,
@@ -314,7 +324,7 @@ impl Core {
         let mut track = track.into_inner();
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
-        self.cur_serial = self.cur_serial.wrapping_add(0);
+        self.cur_serial = self.cur_serial.wrapping_add(1);
 
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
@@ -327,15 +337,36 @@ impl Core {
     }
 
     fn fast_forward_track_boundary(&mut self) -> FastForwardResult {
-        loop {
-            let page = self.get_next_page();
-            debug!("checking page...");
-            if page_starts_track(page.as_ref()) {
-                debug!("checking page... found a start");
-                self.buffer.push_front(page);
+        let mut old_buffer = mem::replace(&mut self.buffer, VecDeque::new());
+
+        let mut page_iter = old_buffer.into_iter();
+
+        while let Some(page) = page_iter.next() {
+            debug!("checking buffer for non-continued page...");
+            if page.as_ref().continued() {
+                debug!("checking buffer for non-continued page... continued; kept");
+                self.buffer.push_back(page);
+            } else {
+                debug!("checking buffer for non-continued page...found page-aligned packet!");
                 break;
             }
         }
+        while let Some(mut page) = page_iter.next() {
+            // debug!("checking page for EOS...");
+            if page.as_ref().eos() {
+                {
+                    let mut tx = page.as_mut().begin();
+                    tx.set_position(self.prev_ogg_granule_pos);
+                    tx.set_serial(self.prev_ogg_serial);
+                    tx.set_sequence(self.prev_ogg_sequence + 1);
+                }
+                debug!("checking page for EOS... found it!");
+                self.buffer.push_back(page);
+                break;
+            }
+        }
+
+        self.buffer.extend(page_iter);
         Ok(())
     }
 
@@ -352,6 +383,7 @@ impl Core {
 
             info!("a client sent {} samples in {} pages", samples, pages);
         }
+
         if track.as_u8_slice().len() == 0 {
             return Err(EnqueueTrackError::InvalidTrack);
         }
@@ -402,6 +434,11 @@ impl Core {
     // copy a page and tells us up to when we have no work to do
     fn tick(&mut self) -> SteadyTime {
         let page = self.get_next_page();
+
+        self.prev_ogg_granule_pos = page.position();
+        self.prev_ogg_serial = page.serial();
+        self.prev_ogg_sequence = page.sequence();
+
         if let Err(err) = self.connector.send_ogg_page(&page) {
             //
         }
@@ -410,10 +447,22 @@ impl Core {
             playing.sample_position = page.position();
         }
 
-        debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}",
+
+        debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}; bos = {:?}; eos = {:?}",
             page.position(),
             page.serial(),
-            page.sequence());
+            page.sequence(),
+            page.bos(),
+            page.eos());
+
+        let vhdr = page.raw_packets().nth(0)
+            .and_then(|packet| VorbisHeader::new(packet).ok())
+            .and_then(|vhdr| vhdr.identification_header());
+
+        if let Some(vhdr) = vhdr {
+            debug!("            :: {:?}", vhdr);
+        }
+
 
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
