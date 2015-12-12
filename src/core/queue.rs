@@ -202,15 +202,16 @@ impl PlayQueue {
     }
 
     fn add_history(&mut self, tinfo: model::TrackInfo) {
-        self.history.push_back(tinfo);
+        self.history.push_front(tinfo);
         while 10 < self.history.len() {
-            let track = self.history.pop_front().unwrap();
+            let track = self.history.pop_back().unwrap();
             self.halloc.dispose(track.handle).unwrap();
         }
     }
 
     pub fn get_history(&self) -> Vec<model::TrackInfo> {
         self.history.iter().skip(1).cloned().collect()
+
     }
 }
 
