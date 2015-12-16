@@ -10,10 +10,10 @@ Running
 
     % cp example-config.toml config.toml
     % vim config.toml
-    % cargo run --bin ireul-core ./config.toml
+    % cargo run -- ./config.toml
 
 then, in another terminal, you may pass ogg files to the server:
 
-    % cargo run --bin ireul-client enqueue ./howbigisthis.ogg
+    % cd ireul-client && cargo run -- queue add ./howbigisthis.ogg
 
 and the song will be added to the playlist.
