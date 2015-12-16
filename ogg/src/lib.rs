@@ -267,6 +267,10 @@ impl OggPageBuf {
         OggPageBuf { inner: empty_page.to_vec() }
     }
 
+    pub fn into_inner(self) -> Vec<u8> {
+        self.inner
+    }
+
     pub fn into_cow(self) -> Cow<'static, OggPage> {
         Cow::Owned(self)
     }
@@ -614,34 +618,50 @@ pub struct OggBuilder {
 }
 
 impl OggBuilder {
-    pub fn from_packets<'a, I>(iter: I) -> OggBuilder where I: Iterator<Item=&'a [u8]> {
-        let mut lengths = Vec::new();
-        let mut buffer = Vec::new();
-        for packet in iter {
-            lengths.push(packet.len());
-            buffer.extend(packet);
-        }
-
+    pub fn new() -> OggBuilder {
         OggBuilder {
-            lengths: lengths,
-            buffer: buffer,
+            lengths: Vec::new(),
+            buffer: Vec::new(),
         }
     }
 
+    pub fn add_packet(&mut self, packet: &[u8]) {
+        self.lengths.push(packet.len());
+        self.buffer.extend(packet);
+    }
+
     pub fn build(&self) -> Result<OggPageBuf, ()> {
-        let mut segment_table = Vec::new();
-        for length in self.lengths.iter() {
-            let mut length: usize = *length;
-            while 255 < length {
-                segment_table.push(255);
-                length -= 255;
-            }
-            segment_table.push(length as u8);
+        let mut segment_count = 0;
+
+        // compute size
+        for &length in self.lengths.iter() {
+            segment_count += length / 255;
+            segment_count += 1;
         }
-        if segment_table.len() > 255 {
+
+        if 255 < segment_count {
             return Err(());
         }
-        unimplemented!();
+
+        let mut header = OggPageBuf::empty().into_inner();
+        header.pop().unwrap(); // pop the ending zero
+        header.push(segment_count as u8);
+
+        for &length in self.lengths.iter() {
+            let mut length: usize = length;
+            while 255 <= length {
+                length -= 255;
+                header.push(255);
+            }
+            header.push(length as u8);
+        }
+
+        let prelen = header.len();
+        header.extend(&self.buffer[..]);
+
+        let page = OggPageBuf::new(header).unwrap();
+        assert_eq!(prelen, page.as_u8_slice().len());
+        Ok(page)
     }
 }
 
