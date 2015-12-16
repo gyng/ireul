@@ -306,7 +306,7 @@ impl OggPage {
 
     pub fn new_mut(buf: &mut [u8]) -> Result<&mut OggPage, OggPageCheckError> {
         let page_length = {
-            let (hbuf, bbuf) = try!(OggPage::measure(buf));
+            let (hbuf, bbuf) = try!(OggPage::split_components(buf));
             hbuf.len() + bbuf.len()
         };
         let page = OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]);
@@ -314,7 +314,7 @@ impl OggPage {
         Ok(page)
     }
 
-    fn measure(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
+    fn split_components(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
         impl From<ByteOrderError> for OggPageCheckError {
             fn from(e: ByteOrderError) -> OggPageCheckError {
                 match e {
@@ -325,7 +325,6 @@ impl OggPage {
         }
 
         let mut cursor = Cursor::new(buf);
-
         if buf.len() < 27 {
             return Err(OggPageCheckError::TooShort);
         }
@@ -363,7 +362,7 @@ impl OggPage {
 
     fn measure_whole(buf: &[u8]) -> Result<&[u8], OggPageCheckError> {
         let page_length = {
-            let (h_buf, b_buf) = try!(OggPage::measure(buf));
+            let (h_buf, b_buf) = try!(OggPage::split_components(buf));
             h_buf.len() + b_buf.len()
         };
         Ok(&buf[0..page_length])
@@ -483,7 +482,7 @@ impl OggPage {
 
     pub fn body(&self) -> &[u8] {
         let slice: &[u8] = self.as_u8_slice();
-        let (_header, body) = OggPage::measure(slice).unwrap();
+        let (_header, body) = OggPage::split_components(slice).unwrap();
         body
     }
 
@@ -609,8 +608,41 @@ impl<'a> Drop for ChecksumGuard<'a> {
     }
 }
 
-pub struct OggPageBuilder {
-    packets: Vec<Vec<u8>>,
+pub struct OggBuilder {
+    lengths: Vec<usize>,
+    buffer: Vec<u8>,
+}
+
+impl OggBuilder {
+    pub fn from_packets<'a, I>(iter: I) -> OggBuilder where I: Iterator<Item=&'a [u8]> {
+        let mut lengths = Vec::new();
+        let mut buffer = Vec::new();
+        for packet in iter {
+            lengths.push(packet.len());
+            buffer.extend(packet);
+        }
+
+        OggBuilder {
+            lengths: lengths,
+            buffer: buffer,
+        }
+    }
+
+    pub fn build(&self) -> Result<OggPageBuf, ()> {
+        let mut segment_table = Vec::new();
+        for length in self.lengths.iter() {
+            let mut length: usize = *length;
+            while 255 < length {
+                segment_table.push(255);
+                length -= 255;
+            }
+            segment_table.push(length as u8);
+        }
+        if segment_table.len() > 255 {
+            return Err(());
+        }
+        unimplemented!();
+    }
 }
 
 pub struct Recapture([u8; 4]);

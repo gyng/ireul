@@ -13,105 +13,144 @@ use ::slice::Slice;
 use {OggPage};
 
 #[derive(Debug)]
-pub enum VorbisHeaderCheckError {
+pub enum VorbisPacketCheckError {
     BadCapture,
     Invalid(&'static str),
     BadIdentificationHeader,
     BadIdentificationHeaderLength,
 }
 
-impl convert::From<str::Utf8Error> for VorbisHeaderCheckError {
-    fn from(_e: str::Utf8Error) -> VorbisHeaderCheckError {
-        VorbisHeaderCheckError::Invalid("invalid utf8 in comment header")
+impl convert::From<str::Utf8Error> for VorbisPacketCheckError {
+    fn from(_e: str::Utf8Error) -> VorbisPacketCheckError {
+        VorbisPacketCheckError::Invalid("invalid utf8 in comment header")
     }
 }
 
-impl convert::From<reader::Error> for VorbisHeaderCheckError {
-    fn from(e: reader::Error) -> VorbisHeaderCheckError {
+impl convert::From<reader::Error> for VorbisPacketCheckError {
+    fn from(e: reader::Error) -> VorbisPacketCheckError {
         match e {
             reader::Error::Truncated => {
-                VorbisHeaderCheckError::Invalid("truncated comment header")
+                VorbisPacketCheckError::Invalid("truncated comment header")
             }
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub enum VorbisHeaderType {
+pub enum VorbisPacketType {
     Audio,
     IdentificationHeader,
     CommentHeader,
     SetupHeader,
 }
 
-impl VorbisHeaderType {
-    pub fn from_u8(n: u8) -> Option<VorbisHeaderType> {
+impl VorbisPacketType {
+    pub fn from_u8(n: u8) -> Option<VorbisPacketType> {
         match n {
-            0 => Some(VorbisHeaderType::Audio),
-            1 => Some(VorbisHeaderType::IdentificationHeader),
-            3 => Some(VorbisHeaderType::CommentHeader),
-            5 => Some(VorbisHeaderType::SetupHeader),
+            0 => Some(VorbisPacketType::Audio),
+            1 => Some(VorbisPacketType::IdentificationHeader),
+            3 => Some(VorbisPacketType::CommentHeader),
+            5 => Some(VorbisPacketType::SetupHeader),
             _ => None
         }
     }
 }
 
-pub struct VorbisHeaderBuf {
+pub struct VorbisPacketBuf {
     inner: Vec<u8>,
 }
 
-pub struct VorbisHeader {
+pub struct VorbisPacket {
     inner: Slice,
 }
 
-impl ops::Deref for VorbisHeaderBuf {
-    type Target = VorbisHeader;
+impl VorbisPacketBuf {
+    pub fn build_comment_packet(comments: &Comments) -> VorbisPacketBuf {
+        let mut buf = Vec::new();
+        buf.extend(b"\x03vorbis");
+        write_comment_vendor(&mut buf, &comments.vendor);
 
-    fn deref<'a>(&'a self) -> &'a VorbisHeader {
-        VorbisHeader::from_u8_slice_unchecked(&self.inner)
+        let mut comments_length = [0; 4];
+        LittleEndian::write_u32(
+            &mut comments_length[..],
+            comments.comments.len() as u32);
+        buf.extend(&comments_length);
+
+        for &(ref key, ref val) in comments.comments.iter() {
+            write_comment_tag(&mut buf, key, val);
+        }
+
+        buf.extend(b"\x01");
+
+        VorbisPacketBuf { inner: buf }
     }
 }
 
-impl Borrow<VorbisHeader> for VorbisHeaderBuf {
-    fn borrow(&self) -> &VorbisHeader {
-        VorbisHeader::from_u8_slice_unchecked(&self.inner)
+fn write_comment_tag(buf: &mut Vec<u8>, key: &str, val: &str) {
+    let length = 1 + key.as_bytes().len() + val.as_bytes().len();
+    let mut length_bytes = [0; 4];
+    LittleEndian::write_u32(&mut length_bytes[..], length as u32);
+    buf.extend(&length_bytes[..]);
+    buf.extend(key.as_bytes());
+    buf.extend(b"=");
+    buf.extend(val.as_bytes());
+}
+
+fn write_comment_vendor(buf: &mut Vec<u8>, val: &str) {
+    let mut length_bytes = [0; 4];
+    LittleEndian::write_u32(&mut length_bytes[..], val.as_bytes().len() as u32);
+    buf.extend(&length_bytes[..]);
+    buf.extend(val.as_bytes());
+}
+
+impl ops::Deref for VorbisPacketBuf {
+    type Target = VorbisPacket;
+
+    fn deref<'a>(&'a self) -> &'a VorbisPacket {
+        VorbisPacket::from_u8_slice_unchecked(&self.inner)
     }
 }
 
-impl BorrowMut<VorbisHeader> for VorbisHeaderBuf {
-    fn borrow_mut(&mut self) -> &mut VorbisHeader {
-        VorbisHeader::from_u8_slice_unchecked_mut(&mut self.inner)
+impl Borrow<VorbisPacket> for VorbisPacketBuf {
+    fn borrow(&self) -> &VorbisPacket {
+        VorbisPacket::from_u8_slice_unchecked(&self.inner)
     }
 }
 
-impl ToOwned for VorbisHeader {
-    type Owned = VorbisHeaderBuf;
-
-    fn to_owned(&self) -> VorbisHeaderBuf {
-        VorbisHeaderBuf { inner: self.inner.to_owned() }
+impl BorrowMut<VorbisPacket> for VorbisPacketBuf {
+    fn borrow_mut(&mut self) -> &mut VorbisPacket {
+        VorbisPacket::from_u8_slice_unchecked_mut(&mut self.inner)
     }
 }
 
-impl VorbisHeader {
-    pub fn new(buf: &[u8]) -> Result<&VorbisHeader, VorbisHeaderCheckError> {
-        try!(VorbisHeader::check(buf));
-        Ok(VorbisHeader::from_u8_slice_unchecked(buf))
+impl ToOwned for VorbisPacket {
+    type Owned = VorbisPacketBuf;
+
+    fn to_owned(&self) -> VorbisPacketBuf {
+        VorbisPacketBuf { inner: self.inner.to_owned() }
+    }
+}
+
+impl VorbisPacket {
+    pub fn new(buf: &[u8]) -> Result<&VorbisPacket, VorbisPacketCheckError> {
+        try!(VorbisPacket::check(buf));
+        Ok(VorbisPacket::from_u8_slice_unchecked(buf))
     }
 
-    pub fn new_mut(buf: &mut [u8]) -> Result<&mut VorbisHeader, VorbisHeaderCheckError> {
-        try!(VorbisHeader::check(buf));
-        Ok(VorbisHeader::from_u8_slice_unchecked_mut(buf))
+    pub fn new_mut(buf: &mut [u8]) -> Result<&mut VorbisPacket, VorbisPacketCheckError> {
+        try!(VorbisPacket::check(buf));
+        Ok(VorbisPacket::from_u8_slice_unchecked_mut(buf))
     }
 
     // The following (private!) function allows unchecked construction of a
     // ogg page from a u8 slice.
-    fn from_u8_slice_unchecked(s: &[u8]) -> &VorbisHeader {
+    fn from_u8_slice_unchecked(s: &[u8]) -> &VorbisPacket {
         unsafe { mem::transmute(s) }
     }
 
     // The following (private!) function allows unchecked construction of a
     // mutable ogg page from a mutable u8 slice.
-    fn from_u8_slice_unchecked_mut(s: &mut [u8]) -> &mut VorbisHeader {
+    fn from_u8_slice_unchecked_mut(s: &mut [u8]) -> &mut VorbisPacket {
         unsafe { mem::transmute(s) }
     }
 
@@ -119,12 +158,12 @@ impl VorbisHeader {
         unsafe { mem::transmute(self) }
     }
 
-    pub fn find_identification<'a, I>(iter: I) -> Result<&'a VorbisHeader, ()>
+    pub fn find_identification<'a, I>(iter: I) -> Result<&'a VorbisPacket, ()>
         where I: Iterator<Item=&'a OggPage>
     {
         for page in iter {
             for packet in page.raw_packets() {
-                if let Ok(vpkt) = VorbisHeader::new(packet) {
+                if let Ok(vpkt) = VorbisPacket::new(packet) {
                     if vpkt.identification_header().is_some() {
                         return Ok(vpkt);
                     }
@@ -134,12 +173,12 @@ impl VorbisHeader {
         Err(())
     }
 
-    pub fn find_comments<'a, I>(iter: I) -> Result<&'a VorbisHeader, ()>
+    pub fn find_comments<'a, I>(iter: I) -> Result<&'a VorbisPacket, ()>
         where I: Iterator<Item=&'a OggPage>
     {
         for page in iter {
             for packet in page.raw_packets() {
-                if let Ok(vpkt) = VorbisHeader::new(packet) {
+                if let Ok(vpkt) = VorbisPacket::new(packet) {
                     if vpkt.comments().is_some() {
                         return Ok(vpkt);
                     }
@@ -149,21 +188,21 @@ impl VorbisHeader {
         Err(())
     }
 
-    pub fn check(buf: &[u8]) -> Result<(), VorbisHeaderCheckError> {
+    pub fn check(buf: &[u8]) -> Result<(), VorbisPacketCheckError> {
         if buf.len() < 8 || &buf[1 .. 7] != b"vorbis" {
-            return Err(VorbisHeaderCheckError::BadCapture)
+            return Err(VorbisPacketCheckError::BadCapture)
         }
 
-        match VorbisHeaderType::from_u8(buf[0]) {
+        match VorbisPacketType::from_u8(buf[0]) {
             None => {
-                return Err(VorbisHeaderCheckError::BadCapture);
+                return Err(VorbisPacketCheckError::BadCapture);
             },
 
-            Some(VorbisHeaderType::IdentificationHeader) => {
-                try!(VorbisHeader::parse_identification_header(buf));
+            Some(VorbisPacketType::IdentificationHeader) => {
+                try!(VorbisPacket::parse_identification_header(buf));
             },
-            Some(VorbisHeaderType::CommentHeader) => {
-                try!(VorbisHeader::parse_comment_header(buf));
+            Some(VorbisPacketType::CommentHeader) => {
+                try!(VorbisPacket::parse_comment_header(buf));
             },
             _ => ()
         }
@@ -174,10 +213,10 @@ impl VorbisHeader {
     pub fn identification_header(&self) -> Option<IdentificationHeader> {
         let buf = self.as_u8_slice();
 
-        // We know the header is well-formed, so it must have a valid VorbisHeaderType
-        match VorbisHeaderType::from_u8(buf[0]).unwrap() {
-            VorbisHeaderType::IdentificationHeader => {
-                let id_header = VorbisHeader::parse_identification_header(buf)
+        // We know the header is well-formed, so it must have a valid VorbisPacketType
+        match VorbisPacketType::from_u8(buf[0]).unwrap() {
+            VorbisPacketType::IdentificationHeader => {
+                let id_header = VorbisPacket::parse_identification_header(buf)
                     .expect("identification header parse error: this shouldn't happen");
                 Some(id_header)
             },
@@ -188,10 +227,10 @@ impl VorbisHeader {
     pub fn comments(&self) -> Option<Comments> {
         let buf = self.as_u8_slice();
 
-        // We know the header is well-formed, so it must have a valid VorbisHeaderType
-        match VorbisHeaderType::from_u8(buf[0]).unwrap() {
-            VorbisHeaderType::CommentHeader => {
-                let id_header = VorbisHeader::parse_comment_header(buf)
+        // We know the header is well-formed, so it must have a valid VorbisPacketType
+        match VorbisPacketType::from_u8(buf[0]).unwrap() {
+            VorbisPacketType::CommentHeader => {
+                let id_header = VorbisPacket::parse_comment_header(buf)
                     .expect("identification header parse error: this shouldn't happen");
                 Some(id_header)
             },
@@ -199,13 +238,13 @@ impl VorbisHeader {
         }
     }
 
-    fn parse_identification_header(buf: &[u8]) -> Result<IdentificationHeader, VorbisHeaderCheckError> {
+    fn parse_identification_header(buf: &[u8]) -> Result<IdentificationHeader, VorbisPacketCheckError> {
         // Must only be called on IdentificationHeader packets.
-        assert_eq!(VorbisHeaderType::from_u8(buf[0]).unwrap(),
-            VorbisHeaderType::IdentificationHeader);
+        assert_eq!(VorbisPacketType::from_u8(buf[0]).unwrap(),
+            VorbisPacketType::IdentificationHeader);
 
         if buf.len() < 30 {
-            return Err(VorbisHeaderCheckError::BadIdentificationHeaderLength)
+            return Err(VorbisPacketCheckError::BadIdentificationHeaderLength)
         }
 
         let vorbis_version = LittleEndian::read_u32(&buf[7 .. 11]);
@@ -214,7 +253,7 @@ impl VorbisHeader {
 
         if audio_channels <= 0 || audio_sample_rate <= 0 {
             // vorbis_version should = 0 to meet Vorbis I specification but it's not checked here
-            return Err(VorbisHeaderCheckError::BadIdentificationHeader)
+            return Err(VorbisPacketCheckError::BadIdentificationHeader)
         }
 
         let bitrate_maximum = LittleEndian::read_u32(&buf[16 .. 20]);
@@ -228,7 +267,7 @@ impl VorbisHeader {
         if blocksize_0 > blocksize_1 || buf[29] & 1 != 1 {
             // If blocksize 0 > blocksize 1 the file is undecodable
             // If framing flag is missing, the file is undecodable
-            return Err(VorbisHeaderCheckError::BadIdentificationHeader)
+            return Err(VorbisPacketCheckError::BadIdentificationHeader)
         }
 
         // It appears framing_flag takes up a byte by itself so buffer is useless
@@ -246,8 +285,7 @@ impl VorbisHeader {
         })
     }
 
-
-    fn parse_comment_header(buf: &[u8]) -> Result<Comments, VorbisHeaderCheckError> {
+    fn parse_comment_header(buf: &[u8]) -> Result<Comments, VorbisPacketCheckError> {
         let mut reader = Reader::<LittleEndian>::new(buf);
         assert_eq!(reader.read_buffer(7).ok().unwrap(), b"\x03vorbis");
 
@@ -267,7 +305,7 @@ impl VorbisHeader {
         }
 
         if (try!(reader.read_u8()) & 1) != 1 {
-            return Err(VorbisHeaderCheckError::Invalid("framing bit unset"))
+            return Err(VorbisPacketCheckError::Invalid("framing bit unset"))
         }
 
         Ok(Comments {
@@ -295,14 +333,13 @@ pub struct Comments {
     pub comments: Vec<(String, String)>
 }
 
-
-fn split_comment(buffer: &str) -> Result<(&str, &str), VorbisHeaderCheckError>{
+fn split_comment(buffer: &str) -> Result<(&str, &str), VorbisPacketCheckError>{
     match buffer.find("=") {
         Some(idx) => {
             // TODO: validate key: 0x20 through 0x7D excluding 0x3D
             Ok((&buffer[..idx], &buffer[idx+1..]))
         }
-        None => Err(VorbisHeaderCheckError::Invalid("Invalid comment")),
+        None => Err(VorbisPacketCheckError::Invalid("Invalid comment")),
     }
 }
 
@@ -310,7 +347,7 @@ fn split_comment(buffer: &str) -> Result<(&str, &str), VorbisHeaderCheckError>{
 #[cfg(test)]
 mod test {
     use {OggTrack};
-    use super::VorbisHeader;
+    use super::{VorbisPacketBuf, VorbisPacket, Comments};
 
     #[test]
     fn test_parse_identification_header() {
@@ -327,7 +364,7 @@ mod test {
             0x01                                // 29    framing_flag
         ];
 
-        let test_header = VorbisHeader::new(&header_buf).unwrap();
+        let test_header = VorbisPacket::new(&header_buf).unwrap();
         let id_header = test_header.identification_header().unwrap();
 
         assert_eq!(id_header.vorbis_version, 0);
@@ -348,7 +385,7 @@ mod test {
             0x00, 0x00, 0x00, 0x00,
         ];
 
-        let negative_test_header = VorbisHeader::new(&not_an_id_header_buf).unwrap();
+        let negative_test_header = VorbisPacket::new(&not_an_id_header_buf).unwrap();
         let negative_id_header = negative_test_header.identification_header();
         assert!(negative_id_header.is_none());
     }
@@ -356,7 +393,7 @@ mod test {
     #[test]
     fn test_parse_malformed_identification_header() {
         let malformed_header_buf = [0x01, 0x76, 0x6f, 0x72, 0x62, 0x69, 0x73];
-        let malformed_test_header = VorbisHeader::new(&malformed_header_buf);
+        let malformed_test_header = VorbisPacket::new(&malformed_header_buf);
         assert!(malformed_test_header.is_err());
     }
 
@@ -445,9 +482,9 @@ mod test {
     #[test]
     fn test_comment_from_ogg() {
         let track = OggTrack::new(SAMPLE_OGG).unwrap();
-        let comment_header = VorbisHeader::find_comments(track.pages()).unwrap();
+        let comm_packet = VorbisPacket::find_comments(track.pages()).unwrap();
 
-        let comments = comment_header.comments().unwrap();
+        let comments = comm_packet.comments().unwrap();
         assert_eq!(comments.vendor, "Xiph.Org libVorbis I 20020713");
         assert_eq!(comments.comments, comments_helper(&[
             ("TITLE", "Hydrate - Kenny Beltrey"),
@@ -460,8 +497,32 @@ mod test {
     }
 
     #[test]
+    fn test_rebuild_comment() {
+        let track = OggTrack::new(SAMPLE_OGG).unwrap();
+        let expected_packet = VorbisPacket::find_comments(track.pages()).unwrap();
+
+        let comments = Comments {
+            vendor: "Xiph.Org libVorbis I 20020713".to_string(),
+            comments: comments_helper(&[
+                ("TITLE", "Hydrate - Kenny Beltrey"),
+                ("ARTIST", "Kenny Beltrey"),
+                ("ALBUM", "Favorite Things"),
+                ("DATE", "2002"),
+                ("COMMENT", "http://www.kahvi.org"),
+                ("TRACKNUMBER", "2")
+            ]),
+        };
+
+        let pkt = VorbisPacketBuf::build_comment_packet(&comments);
+        assert_eq!(
+            expected_packet.as_u8_slice(),
+            pkt.as_u8_slice());
+    }
+
+
+    #[test]
     fn test_parse_comment_header_valid() {
-        let test_header = VorbisHeader::new(COMMENT_HEADER_VALID).unwrap();
+        let test_header = VorbisPacket::new(COMMENT_HEADER_VALID).unwrap();
         let comments = test_header.comments().unwrap();
         assert_eq!(comments.vendor, "test");
         assert_eq!(comments.comments.len(), 2);
@@ -469,21 +530,21 @@ mod test {
 
     #[test]
     fn test_parse_malformed_comment_header_unset_framing_bit() {
-        VorbisHeader::new(COMMENT_HEADER_UNSET_FRAMING_BIT).err().unwrap();
+        VorbisPacket::new(COMMENT_HEADER_UNSET_FRAMING_BIT).err().unwrap();
     }
 
     #[test]
     fn test_parse_malformed_comment_header_framing_bit_truncated() {
-        VorbisHeader::new(COMMENT_HEADER_FRAMING_BIT_TRUNCATED).err().unwrap();
+        VorbisPacket::new(COMMENT_HEADER_FRAMING_BIT_TRUNCATED).err().unwrap();
     }
 
     #[test]
     fn test_parse_malformed_comment_header_truncated_mid_comment() {
-        VorbisHeader::new(COMMENT_HEADER_TRUNCATED_MID_COMMENT).err().unwrap();
+        VorbisPacket::new(COMMENT_HEADER_TRUNCATED_MID_COMMENT).err().unwrap();
     }
 
     #[test]
     fn test_parse_malformed_comment_header_truncated_comments() {
-        VorbisHeader::new(COMMENT_HEADER_TRUNCATED_COMMENTS).err().unwrap();
+        VorbisPacket::new(COMMENT_HEADER_TRUNCATED_COMMENTS).err().unwrap();
     }
 }

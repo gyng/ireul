@@ -25,7 +25,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 use time::SteadyTime;
 
 use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
-use ogg::vorbis::VorbisHeader;
+use ogg::vorbis::VorbisPacket;
 use ogg_clock::OggClock;
 
 use ireul_interface::proto;
@@ -174,12 +174,12 @@ fn validate_positions(track: &OggTrack) -> Result<(), ()> {
 }
 
 fn validate_comment_section(track: &OggTrack) -> Result<(), ()> {
-    let _ = try!(VorbisHeader::find_comments(track.pages()));
+    let _ = try!(VorbisPacket::find_comments(track.pages()));
     Ok(())
 }
 
 fn check_sample_rate(req: u32, track: &OggTrack) -> Result<(), ()> {
-    let packet = try!(VorbisHeader::find_identification(track.pages()));
+    let packet = try!(VorbisPacket::find_identification(track.pages()));
 
     // find_identification will always find a packet with an identification_header
     let id_header = packet.identification_header().unwrap();
@@ -456,7 +456,7 @@ impl Core {
             page.eos());
 
         let vhdr = page.raw_packets().nth(0)
-            .and_then(|packet| VorbisHeader::new(packet).ok())
+            .and_then(|packet| VorbisPacket::new(packet).ok())
             .and_then(|vhdr| vhdr.identification_header());
 
         if let Some(vhdr) = vhdr {

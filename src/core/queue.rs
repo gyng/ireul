@@ -4,7 +4,7 @@ use std::collections::{VecDeque, HashMap, HashSet};
 use rand::{self, Rng, ChaChaRng};
 
 use ogg::{OggTrack, OggTrackBuf};
-use ogg::vorbis::{Comments, VorbisHeader};
+use ogg::vorbis::{Comments, VorbisPacket};
 use ireul_interface::proxy::track::model::{self, Handle};
 
 
@@ -68,12 +68,12 @@ impl Track {
     pub fn from_ogg_track(handle: Handle, ogg: OggTrackBuf) -> Track {
         use std::ascii::AsciiExt;
 
-        let id_header = match VorbisHeader::find_identification(ogg.pages()) {
+        let id_header = match VorbisPacket::find_identification(ogg.pages()) {
             Ok(header) => header.identification_header(),
             Err(_) => None
         }.expect("Invalid OggTrackBuf");
 
-        let comments = match VorbisHeader::find_comments(ogg.pages()) {
+        let comments = match VorbisPacket::find_comments(ogg.pages()) {
             Ok(header) => header.comments(),
             Err(_) => None
         }.expect("Invalid OggTrackBuf");
