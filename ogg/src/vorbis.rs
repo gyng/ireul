@@ -65,15 +65,22 @@ pub struct VorbisPacket {
 }
 
 impl VorbisPacketBuf {
+    pub fn new(buf: Vec<u8>) -> Result<VorbisPacketBuf, VorbisPacketCheckError> {
+        try!(VorbisPacket::check(&buf[..]));
+        Ok(VorbisPacketBuf { inner: buf })
+    }
+
     pub fn build_comment_packet(comments: &Comments) -> VorbisPacketBuf {
         let mut buf = Vec::new();
         buf.extend(b"\x03vorbis");
         write_comment_vendor(&mut buf, &comments.vendor);
 
         let mut comments_length = [0; 4];
+
         LittleEndian::write_u32(
             &mut comments_length[..],
             comments.comments.len() as u32);
+
         buf.extend(&comments_length);
 
         for &(ref key, ref val) in comments.comments.iter() {
@@ -107,6 +114,12 @@ impl ops::Deref for VorbisPacketBuf {
     type Target = VorbisPacket;
 
     fn deref<'a>(&'a self) -> &'a VorbisPacket {
+        VorbisPacket::from_u8_slice_unchecked(&self.inner)
+    }
+}
+
+impl AsRef<VorbisPacket> for VorbisPacketBuf {
+    fn as_ref(&self) -> &VorbisPacket {
         VorbisPacket::from_u8_slice_unchecked(&self.inner)
     }
 }
@@ -189,19 +202,23 @@ impl VorbisPacket {
     }
 
     pub fn check(buf: &[u8]) -> Result<(), VorbisPacketCheckError> {
-        if buf.len() < 8 || &buf[1 .. 7] != b"vorbis" {
+        if buf.len() < 1 {
             return Err(VorbisPacketCheckError::BadCapture)
         }
-
         match VorbisPacketType::from_u8(buf[0]) {
             None => {
                 return Err(VorbisPacketCheckError::BadCapture);
             },
-
             Some(VorbisPacketType::IdentificationHeader) => {
+                if buf.len() < 8 || &buf[1..7] != b"vorbis" {
+                    return Err(VorbisPacketCheckError::BadCapture)
+                }
                 try!(VorbisPacket::parse_identification_header(buf));
             },
             Some(VorbisPacketType::CommentHeader) => {
+                if buf.len() < 8 || &buf[1..7] != b"vorbis" {
+                    return Err(VorbisPacketCheckError::BadCapture)
+                }
                 try!(VorbisPacket::parse_comment_header(buf));
             },
             _ => ()
@@ -327,7 +344,7 @@ pub struct IdentificationHeader {
     pub blocksize_1: u8,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Comments {
     pub vendor: String,
     pub comments: Vec<(String, String)>
