@@ -484,6 +484,12 @@ impl OggPage {
         }
     }
 
+    pub fn header(&self) -> &[u8] {
+        let slice: &[u8] = self.as_u8_slice();
+        let (header, _body) = OggPage::split_components(slice).unwrap();
+        header
+    }
+
     pub fn body(&self) -> &[u8] {
         let slice: &[u8] = self.as_u8_slice();
         let (_header, body) = OggPage::split_components(slice).unwrap();
@@ -538,15 +544,16 @@ impl<'a> Iterator for RawPackets<'a> {
         let mut length: usize = 0;
 
         while self.packet < self.packet_count {
-            length += slice[self.packet_offset + self.packet] as usize;
+            let adding = slice[self.packet_offset + self.packet] as usize;
+            length += adding;
             self.packet += 1;
-            if length < 255 {
+            if adding < 255 {
                 break;
             }
         }
         self.body_offset += length;
-
-        Some(&slice[offset..][..length])
+        let pkt = &slice[offset..][..length];
+        Some(pkt)
     }
 }
 
@@ -626,6 +633,7 @@ impl OggBuilder {
     }
 
     pub fn add_packet(&mut self, packet: &[u8]) {
+        println!("adding packet {:?}=>{:?}", packet.len(), packet);
         self.lengths.push(packet.len());
         self.buffer.extend(packet);
     }
@@ -656,9 +664,8 @@ impl OggBuilder {
             header.push(length as u8);
         }
 
-        let prelen = header.len();
         header.extend(&self.buffer[..]);
-
+        let prelen = header.len();
         let page = OggPageBuf::new(header).unwrap();
         assert_eq!(prelen, page.as_u8_slice().len());
         Ok(page)
@@ -735,7 +742,6 @@ mod tests {
         assert!(page1packets.next().unwrap().starts_with(b"\x03vorbis"));
         assert!(page1packets.next().unwrap().starts_with(b"\x05vorbis"));
         assert!(page1packets.next().is_none());
-
     }
 
     #[test]
