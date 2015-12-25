@@ -24,8 +24,8 @@ use std::fs::File;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 use time::SteadyTime;
 
-use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
-use ogg::vorbis::VorbisPacket;
+use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf, OggBuilder};
+use ogg::vorbis::{VorbisPacket, VorbisPacketBuf, Comments as VorbisComments};
 use ogg_clock::OggClock;
 
 use ireul_interface::proto;
@@ -372,7 +372,7 @@ impl Core {
 
     // **
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
-        let EnqueueTrackRequest { track } = req;
+        let EnqueueTrackRequest { track, metadata } = req;
         {
             let mut pages = 0;
             let mut samples = 0;
@@ -396,6 +396,14 @@ impl Core {
 
         try!(check_sample_rate(self.clock.sample_rate(), &track)
             .map_err(|()| EnqueueTrackError::BadSampleRate));
+
+        let track = rewrite_comments(track.as_ref(), |comments| {
+            comments.vendor = "Ireul Core".to_string();
+            if let Some(ref metadata) = metadata {
+                comments.comments.clear();
+                comments.comments.extend(metadata.iter().cloned());
+            }
+        });
 
         let handle = self.play_queue.add_track(track.as_ref())
             .map_err(|err| match err {
@@ -447,7 +455,6 @@ impl Core {
             playing.sample_position = page.position();
         }
 
-
         debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}; bos = {:?}; eos = {:?}",
             page.position(),
             page.serial(),
@@ -463,13 +470,63 @@ impl Core {
             debug!("            :: {:?}", vhdr);
         }
 
-
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
-
-
 }
 
-fn page_starts_track(page: &OggPage) -> bool {
-    page.body().starts_with(b"\x01vorbis")
+fn rewrite_comments<F>(track: &OggTrack, func: F) -> OggTrackBuf
+    where F: Fn(&mut VorbisComments) -> ()
+{
+    let mut track_rw: Vec<u8> = Vec::new();
+
+    for page in track.pages() {
+        // determine if we have a comment packet
+        let mut have_comment = false;
+        for packet in page.raw_packets() {
+            if let Ok(vpkt) = VorbisPacket::new(packet) {
+                if vpkt.comments().is_some() {
+                    have_comment = true;
+                }
+            }
+        }
+
+        // fast-path: no comment
+        if !have_comment {
+            track_rw.extend(page.as_u8_slice());
+            continue;
+        }
+
+        let mut builder = OggBuilder::new();
+        for packet in page.raw_packets() {
+            let mut emitted = false;
+            if let Ok(vpkt) = VorbisPacket::new(packet) {
+                if let Some(mut comments) = vpkt.comments() {
+                    func(&mut comments);
+
+                    let new_vpkt = VorbisPacketBuf::build_comment_packet(&comments);
+                    builder.add_packet(new_vpkt.as_u8_slice());
+                    emitted = true;
+                }
+            }
+            if !emitted {
+                println!("adding packet: {:?}", packet);
+                builder.add_packet(packet);
+            }
+        }
+
+        let mut new_page = builder.build().unwrap();
+        {
+            let mut tx = new_page.as_mut().begin();
+            tx.set_position(page.position());
+            tx.set_serial(page.serial());
+            tx.set_sequence(page.sequence());
+            tx.set_continued(page.continued());
+            tx.set_bos(page.bos());
+            tx.set_eos(page.eos());
+        }
+
+        track_rw.extend(new_page.as_u8_slice());
+    }
+
+    OggTrackBuf::new(track_rw).unwrap()
 }
