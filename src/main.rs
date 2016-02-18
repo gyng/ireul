@@ -14,6 +14,7 @@ extern crate time;
 
 use std::thread;
 use std::env;
+use std::mem;
 use std::sync::{Arc, Mutex};
 use std::net::{TcpStream, TcpListener};
 use std::collections::VecDeque;
@@ -23,8 +24,8 @@ use std::fs::File;
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 use time::SteadyTime;
 
-use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf};
-use ogg::vorbis::VorbisHeader;
+use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf, OggBuilder};
+use ogg::vorbis::{VorbisPacket, VorbisPacketBuf, Comments as VorbisComments};
 use ogg_clock::OggClock;
 
 use ireul_interface::proto;
@@ -33,6 +34,7 @@ use ireul_interface::proxy::track::{
     StatusRequest,
     StatusResult,
 };
+
 use ireul_interface::proxy::{
     RequestType,
     EnqueueTrackRequest,
@@ -41,6 +43,9 @@ use ireul_interface::proxy::{
     FastForward,
     FastForwardRequest,
     FastForwardResult,
+    ReplaceFallbackRequest,
+    ReplaceFallbackResult,
+    ReplaceFallbackError,
 };
 
 mod queue;
@@ -51,6 +56,8 @@ use icecastwriter::{
     IceCastWriter,
     IceCastWriterOptions,
 };
+
+const DEAD_AIR: &'static [u8] = include_bytes!("deadair.ogg");
 
 #[derive(RustcDecodable, Debug)]
 struct MetadataConfig {
@@ -64,16 +71,18 @@ struct MetadataConfig {
 struct Config {
     icecast_url: String,
     metadata: Option<MetadataConfig>,
+    fallback_track: Option<String>,
 }
 
 impl Config {
-    fn icecast_writer_opts(&self) -> Result<IceCastWriterOptions, String> {
+    fn icecast_url(&self) -> Result<url::Url, String> {
         let url = try!(url::Url::parse(&self.icecast_url)
             .map_err(|err| format!("Malformed URL: {:?}", err)));
+        Ok(url)
+    }
 
-        let mut opts = try!(IceCastWriterOptions::from_url(&url)
-            .map_err(|err| format!("Unacceptable URL: {:?}", err)));
-
+    fn icecast_writer_opts(&self) -> Result<IceCastWriterOptions, String> {
+        let mut opts = IceCastWriterOptions::default();
         if let Some(ref metadata) = self.metadata {
             if let Some(ref name) = metadata.name {
                 opts.set_name(name);
@@ -97,19 +106,26 @@ fn main() {
     env_logger::init().unwrap();
 
     let config_file = env::args_os().nth(1).unwrap();
+
     let config: Config = {
         let mut reader = File::open(&config_file).expect("failed to open config file");
         let mut config_buf = String::new();
         reader.read_to_string(&mut config_buf).expect("failed to read config");
         toml::decode_str(&config_buf).expect("invalid config file")
     };
-    let icecast_options = config.icecast_writer_opts().unwrap();
 
-    let connector = IceCastWriter::new(icecast_options).unwrap();
-    let mut file = File::open("howbigisthis.ogg").unwrap();
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).unwrap();
-    let offline_track = OggTrackBuf::new(buffer).unwrap();
+    let icecast_url = config.icecast_url().unwrap();
+    let icecast_options = config.icecast_writer_opts().unwrap();
+    let connector = IceCastWriter::with_options(&icecast_url, icecast_options).unwrap();
+
+    let mut offline_track = OggTrack::new(DEAD_AIR).unwrap().to_owned();
+
+    if let Some(ref filename) = config.fallback_track {
+        let mut file = File::open("howbigisthis.ogg").unwrap();
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).unwrap();
+        offline_track = OggTrackBuf::new(buffer).unwrap();
+    }
 
     let control = TcpListener::bind("0.0.0.0:3001").unwrap();
     let core = Arc::new(Mutex::new(Core {
@@ -118,11 +134,16 @@ fn main() {
         clock: OggClock::new(48000),
         playing_offline: false,
         buffer: VecDeque::new(),
+
+        prev_ogg_granule_pos: 0,
+        prev_ogg_serial: 0,
+        prev_ogg_sequence: 0,
+
         play_queue: PlayQueue::new(20),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
     }));
-    
+
     let client_core = core.clone();
     thread::spawn(move || {
         client_acceptor(control, client_core.clone());
@@ -164,12 +185,12 @@ fn validate_positions(track: &OggTrack) -> Result<(), ()> {
 }
 
 fn validate_comment_section(track: &OggTrack) -> Result<(), ()> {
-    let _ = try!(VorbisHeader::find_comments(track.pages()));
+    let _ = try!(VorbisPacket::find_comments(track.pages()));
     Ok(())
 }
 
 fn check_sample_rate(req: u32, track: &OggTrack) -> Result<(), ()> {
-    let packet = try!(VorbisHeader::find_identification(track.pages()));
+    let packet = try!(VorbisPacket::find_identification(track.pages()));
 
     // find_identification will always find a packet with an identification_header
     let id_header = packet.identification_header().unwrap();
@@ -254,7 +275,14 @@ fn client_worker(mut stream: TcpStream, core: Arc<Mutex<Core>>) -> io::Result<()
                     exc_core.queue_status(req)
                 };
                 proto::serialize(&resp).unwrap()
-            }
+            },
+            RequestType::ReplaceFallback => {
+                let req = proto::deserialize(&mut cursor).unwrap();
+                let resp = {
+                    let mut exc_core = core.lock().unwrap();
+                    exc_core.replace_fallback(req)
+                };
+                proto::serialize(&resp).unwrap()            }
         };
         try!(stream.write_u32::<BigEndian>(response.len() as u32));
         try!(stream.write_all(&response));
@@ -288,6 +316,10 @@ struct Core {
     playing_offline: bool,
     buffer: VecDeque<OggPageBuf>,
 
+    prev_ogg_granule_pos: u64,
+    prev_ogg_serial: u32,
+    prev_ogg_sequence: u32,
+
     play_queue: PlayQueue,
     offline_track: queue::Track,
     playing: Option<model::TrackInfo>,
@@ -298,10 +330,6 @@ impl Core {
         let track: queue::Track = match self.play_queue.pop_track() {
             Some(track) => {
                 self.playing_offline = false;
-
-                if let Some(was_playing) = self.playing.take() {
-                    self.play_queue.add_history(was_playing);
-                }
                 self.playing = Some(track.get_track_info());
                 track
             },
@@ -314,7 +342,7 @@ impl Core {
         let mut track = track.into_inner();
         // not sure why we as_mut instead of just using &mut track
         update_serial(self.cur_serial, track.as_mut());
-        self.cur_serial = self.cur_serial.wrapping_add(0);
+        self.cur_serial = self.cur_serial.wrapping_add(1);
 
         self.buffer.extend(track.pages().map(|x| x.to_owned()));
     }
@@ -327,21 +355,42 @@ impl Core {
     }
 
     fn fast_forward_track_boundary(&mut self) -> FastForwardResult {
-        loop {
-            let page = self.get_next_page();
-            debug!("checking page...");
-            if page_starts_track(page.as_ref()) {
-                debug!("checking page... found a start");
-                self.buffer.push_front(page);
+        let mut old_buffer = mem::replace(&mut self.buffer, VecDeque::new());
+
+        let mut page_iter = old_buffer.into_iter();
+
+        while let Some(page) = page_iter.next() {
+            debug!("checking buffer for non-continued page...");
+            if page.as_ref().continued() {
+                debug!("checking buffer for non-continued page... continued; kept");
+                self.buffer.push_back(page);
+            } else {
+                debug!("checking buffer for non-continued page...found page-aligned packet!");
                 break;
             }
         }
+        while let Some(mut page) = page_iter.next() {
+            // debug!("checking page for EOS...");
+            if page.as_ref().eos() {
+                {
+                    let mut tx = page.as_mut().begin();
+                    tx.set_position(self.prev_ogg_granule_pos);
+                    tx.set_serial(self.prev_ogg_serial);
+                    tx.set_sequence(self.prev_ogg_sequence + 1);
+                }
+                debug!("checking page for EOS... found it!");
+                self.buffer.push_back(page);
+                break;
+            }
+        }
+
+        self.buffer.extend(page_iter);
         Ok(())
     }
 
     // **
     fn enqueue_track(&mut self, req: EnqueueTrackRequest) -> EnqueueTrackResult {
-        let EnqueueTrackRequest { track } = req;
+        let EnqueueTrackRequest { track, metadata } = req;
         {
             let mut pages = 0;
             let mut samples = 0;
@@ -352,6 +401,7 @@ impl Core {
 
             info!("a client sent {} samples in {} pages", samples, pages);
         }
+
         if track.as_u8_slice().len() == 0 {
             return Err(EnqueueTrackError::InvalidTrack);
         }
@@ -364,6 +414,14 @@ impl Core {
 
         try!(check_sample_rate(self.clock.sample_rate(), &track)
             .map_err(|()| EnqueueTrackError::BadSampleRate));
+
+        let track = rewrite_comments(track.as_ref(), |comments| {
+            comments.vendor = "Ireul Core".to_string();
+            if let Some(ref metadata) = metadata {
+                comments.comments.clear();
+                comments.comments.extend(metadata.iter().cloned());
+            }
+        });
 
         let handle = self.play_queue.add_track(track.as_ref())
             .map_err(|err| match err {
@@ -399,26 +457,133 @@ impl Core {
         })
     }
 
+    fn replace_fallback(&mut self, req: ReplaceFallbackRequest) -> ReplaceFallbackResult {
+        let ReplaceFallbackRequest { track, metadata } = req;
+        {
+            let mut pages = 0;
+            let mut samples = 0;
+            for page in track.pages() {
+                pages += 1;
+                samples = page.position();
+            }
+
+            info!("a client sent {} samples in {} pages", samples, pages);
+        }
+
+        if track.as_u8_slice().len() == 0 {
+            return Err(ReplaceFallbackError::InvalidTrack);
+        }
+
+        try!(validate_positions(&track)
+            .map_err(|()| ReplaceFallbackError::InvalidTrack));
+
+        try!(validate_comment_section(&track)
+            .map_err(|()| ReplaceFallbackError::InvalidTrack));
+
+        try!(check_sample_rate(self.clock.sample_rate(), &track)
+            .map_err(|()| ReplaceFallbackError::BadSampleRate));
+
+        let track = rewrite_comments(track.as_ref(), |comments| {
+            comments.vendor = "Ireul Core".to_string();
+            if let Some(ref metadata) = metadata {
+                comments.comments.clear();
+                comments.comments.extend(metadata.iter().cloned());
+            }
+        });
+
+        self.offline_track = queue::Track::from_ogg_track(Handle(0), track);
+
+        Ok(())
+    }
+
     // copy a page and tells us up to when we have no work to do
     fn tick(&mut self) -> SteadyTime {
         let page = self.get_next_page();
-        self.connector.send_ogg_page(&page).unwrap();
+
+        self.prev_ogg_granule_pos = page.position();
+        self.prev_ogg_serial = page.serial();
+        self.prev_ogg_sequence = page.sequence();
+
+        if let Err(err) = self.connector.send_ogg_page(&page) {
+            //
+        }
 
         if let Some(playing) = self.playing.as_mut() {
             playing.sample_position = page.position();
         }
 
-        debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}",
+        debug!("copied page :: granule_pos = {:?}; serial = {:?}; sequence = {:?}; bos = {:?}; eos = {:?}",
             page.position(),
             page.serial(),
-            page.sequence());
+            page.sequence(),
+            page.bos(),
+            page.eos());
+
+        let vhdr = page.raw_packets().nth(0)
+            .and_then(|packet| VorbisPacket::new(packet).ok())
+            .and_then(|vhdr| vhdr.identification_header());
+
+        if let Some(vhdr) = vhdr {
+            debug!("            :: {:?}", vhdr);
+        }
 
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
-
-
 }
 
-fn page_starts_track(page: &OggPage) -> bool {
-    page.body().starts_with(b"\x01vorbis")
+fn rewrite_comments<F>(track: &OggTrack, func: F) -> OggTrackBuf
+    where F: Fn(&mut VorbisComments) -> ()
+{
+    let mut track_rw: Vec<u8> = Vec::new();
+
+    for page in track.pages() {
+        // determine if we have a comment packet
+        let mut have_comment = false;
+        for packet in page.raw_packets() {
+            if let Ok(vpkt) = VorbisPacket::new(packet) {
+                if vpkt.comments().is_some() {
+                    have_comment = true;
+                }
+            }
+        }
+
+        // fast-path: no comment
+        if !have_comment {
+            track_rw.extend(page.as_u8_slice());
+            continue;
+        }
+
+        let mut builder = OggBuilder::new();
+        for packet in page.raw_packets() {
+            let mut emitted = false;
+            if let Ok(vpkt) = VorbisPacket::new(packet) {
+                if let Some(mut comments) = vpkt.comments() {
+                    func(&mut comments);
+
+                    let new_vpkt = VorbisPacketBuf::build_comment_packet(&comments);
+                    builder.add_packet(new_vpkt.as_u8_slice());
+                    emitted = true;
+                }
+            }
+            if !emitted {
+                println!("adding packet: {:?}", packet);
+                builder.add_packet(packet);
+            }
+        }
+
+        let mut new_page = builder.build().unwrap();
+        {
+            let mut tx = new_page.as_mut().begin();
+            tx.set_position(page.position());
+            tx.set_serial(page.serial());
+            tx.set_sequence(page.sequence());
+            tx.set_continued(page.continued());
+            tx.set_bos(page.bos());
+            tx.set_eos(page.eos());
+        }
+
+        track_rw.extend(new_page.as_u8_slice());
+    }
+
+    OggTrackBuf::new(track_rw).unwrap()
 }

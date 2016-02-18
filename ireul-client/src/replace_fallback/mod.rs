@@ -1,7 +1,8 @@
 use std::io::{self, Read, Write};
-use std::fs::File;
+use std::fs::{self, File};
 use std::ffi::OsString;
 use std::net::TcpStream;
+use std::process;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
@@ -10,18 +11,22 @@ use ogg::OggTrackBuf;
 use ireul_interface::proto;
 use ireul_interface::proxy::{
     RequestType,
-    EnqueueTrackRequest,
-    EnqueueTrackResult,
+    ReplaceFallbackRequest,
+    ReplaceFallbackResult,
 };
 
-use ::entrypoint::{Error as EntryPointError};
+use ::entrypoint::{
+    self as ep,
+    EntryPoint as EntryPointTrait,
+    Error as EntryPointError,
+};
 
 pub struct EntryPoint;
 
 unsafe impl Sync for EntryPoint {}
 
-impl ::entrypoint::EntryPoint for EntryPoint {
-    fn main(&self, args: Vec<OsString>) -> Result<(), EntryPointError> {
+impl ep::EntryPoint for EntryPoint {
+    fn main(&self, args: Vec<OsString>) -> Result<(), ep::Error> {
         main(args)
     }
 
@@ -43,9 +48,8 @@ impl ProgramArgs {
         }
 
         let app_name = args[0].clone();
-        assert_eq!(&args[1], "queue");
-        assert_eq!(&args[2], "add");
-        let target_file = args[3].clone();
+        assert_eq!(&args[1], "replace-fallback");
+        let target_file = args[2].clone();
 
         Ok(ProgramArgs {
             app_name: app_name,
@@ -55,7 +59,7 @@ impl ProgramArgs {
 }
 
 
-fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
+fn main(args: Vec<OsString>) -> Result<(), ep::Error> {
     let args = try!(ProgramArgs::new(args));
 
     let mut file = io::BufReader::new(try!(File::open(&args.target_file)));
@@ -71,11 +75,14 @@ fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     }
 
     println!("loaded {} samples in {} pages", samples, pages);
-    let req = EnqueueTrackRequest { track: track };
+    let req = ReplaceFallbackRequest {
+        track: track,
+        metadata: None,
+    };
 
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
     try!(conn.write_u8(0));
-    try!(conn.write_u32::<BigEndian>(RequestType::EnqueueTrack.to_op_code()));
+    try!(conn.write_u32::<BigEndian>(RequestType::ReplaceFallback.to_op_code()));
 
     let buf = proto::serialize(&req).unwrap();
     try!(conn.write_u32::<BigEndian>(buf.len() as u32));
@@ -89,7 +96,7 @@ fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     }
 
     let mut frame = io::Cursor::new(resp_buf);
-    let res: EnqueueTrackResult = proto::deserialize(&mut frame).unwrap();
+    let res: ReplaceFallbackResult = proto::deserialize(&mut frame).unwrap();
     println!("got response: {:?}", res);
 
     try!(conn.write_u8(0));
@@ -97,6 +104,7 @@ fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
 
     Ok(())
 }
+
 
 fn print_usage(args: &[OsString]) {
     println!("{} queue add <ogg-file>", args[0].clone().into_string().ok().unwrap());

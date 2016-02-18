@@ -11,6 +11,7 @@ mod enqueue;
 mod fastforward;
 mod entrypoint;
 mod queue;
+mod replace_fallback;
 
 use entrypoint::EntryPoint;
 
@@ -18,6 +19,7 @@ static ENTRY_POINT_MAP: &'static [(&'static str, &'static EntryPoint)] = &[
     ("enqueue", &enqueue::EntryPoint),
     ("fast-forward", &fastforward::EntryPoint),
     ("queue", &queue::EntryPoint),
+    ("replace-fallback", &replace_fallback::EntryPoint),
 ];
 
 fn print_usage(args: &[OsString]) {

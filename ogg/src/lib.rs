@@ -251,6 +251,26 @@ impl OggPageBuf {
         Ok(OggPageBuf { inner: buf })
     }
 
+    pub fn empty() -> OggPageBuf {
+        let empty_page = [
+            b'O', b'g', b'g', b'S', // capture
+            0, // version
+            0, // header type
+            0, 0, 0, 0, 0, 0, 0, 0, // granule position
+            0, 0, 0, 0, // bitstream serial number
+            0, 0, 0, 0, // page seq number
+            0x11, 0xA5, 0xA1, 0x9E, // checksum
+            0, // page segments lengths
+        ].to_vec();
+
+        debug_assert!(OggPage::new(&empty_page[..]).is_ok());
+        OggPageBuf { inner: empty_page.to_vec() }
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.inner
+    }
+
     pub fn into_cow(self) -> Cow<'static, OggPage> {
         Cow::Owned(self)
     }
@@ -290,7 +310,7 @@ impl OggPage {
 
     pub fn new_mut(buf: &mut [u8]) -> Result<&mut OggPage, OggPageCheckError> {
         let page_length = {
-            let (hbuf, bbuf) = try!(OggPage::measure(buf));
+            let (hbuf, bbuf) = try!(OggPage::split_components(buf));
             hbuf.len() + bbuf.len()
         };
         let page = OggPage::from_u8_slice_unchecked_mut(&mut buf[0..page_length]);
@@ -298,7 +318,7 @@ impl OggPage {
         Ok(page)
     }
 
-    fn measure(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
+    fn split_components(buf: &[u8]) -> Result<(&[u8], &[u8]), OggPageCheckError> {
         impl From<ByteOrderError> for OggPageCheckError {
             fn from(e: ByteOrderError) -> OggPageCheckError {
                 match e {
@@ -309,7 +329,6 @@ impl OggPage {
         }
 
         let mut cursor = Cursor::new(buf);
-
         if buf.len() < 27 {
             return Err(OggPageCheckError::TooShort);
         }
@@ -347,7 +366,7 @@ impl OggPage {
 
     fn measure_whole(buf: &[u8]) -> Result<&[u8], OggPageCheckError> {
         let page_length = {
-            let (h_buf, b_buf) = try!(OggPage::measure(buf));
+            let (h_buf, b_buf) = try!(OggPage::split_components(buf));
             h_buf.len() + b_buf.len()
         };
         Ok(&buf[0..page_length])
@@ -374,6 +393,43 @@ impl OggPage {
         let mut tx = self.begin();
         tx.set_serial(serial);
     }
+
+    pub fn continued(&self) -> bool {
+        const FLAG: u8 = 0x01;
+
+        let self_buf = self.as_u8_slice();
+        (self_buf[5] & FLAG) > 0
+    }
+
+    pub fn set_continued(&mut self, value: bool) {
+        let mut tx = self.begin();
+        tx.set_continued(value);
+    }
+
+    pub fn bos(&self) -> bool {
+        const FLAG: u8 = 0x02;
+
+        let self_buf = self.as_u8_slice();
+        (self_buf[5] & FLAG) > 0
+    }
+
+    pub fn set_bos(&mut self, value: bool) {
+        let mut tx = self.begin();
+        tx.set_bos(value);
+    }
+
+    pub fn eos(&self) -> bool {
+        const FLAG: u8 = 0x04;
+
+        let self_buf = self.as_u8_slice();
+        (self_buf[5] & FLAG) > 0
+    }
+
+    pub fn set_eos(&mut self, value: bool) {
+        let mut tx = self.begin();
+        tx.set_eos(value);
+    }
+
 
     pub fn sequence(&self) -> u32 {
         let self_buf = self.as_u8_slice();
@@ -428,9 +484,15 @@ impl OggPage {
         }
     }
 
+    pub fn header(&self) -> &[u8] {
+        let slice: &[u8] = self.as_u8_slice();
+        let (header, _body) = OggPage::split_components(slice).unwrap();
+        header
+    }
+
     pub fn body(&self) -> &[u8] {
         let slice: &[u8] = self.as_u8_slice();
-        let (_header, body) = OggPage::measure(slice).unwrap();
+        let (_header, body) = OggPage::split_components(slice).unwrap();
         body
     }
 
@@ -482,15 +544,16 @@ impl<'a> Iterator for RawPackets<'a> {
         let mut length: usize = 0;
 
         while self.packet < self.packet_count {
-            length += slice[self.packet_offset + self.packet] as usize;
+            let adding = slice[self.packet_offset + self.packet] as usize;
+            length += adding;
             self.packet += 1;
-            if length < 255 {
+            if adding < 255 {
                 break;
             }
         }
         self.body_offset += length;
-
-        Some(&slice[offset..][..length])
+        let pkt = &slice[offset..][..length];
+        Some(pkt)
     }
 }
 
@@ -517,6 +580,37 @@ impl<'a> ChecksumGuard<'a> {
         let seq_slice = &mut self_buf[SEQUENCE_OFFSET..SEQUENCE_OFFSET+4];
         LittleEndian::write_u32(seq_slice, sequence);
     }
+
+    pub fn set_continued(&mut self, value: bool) {
+        const FLAG: u8 = 0x01;
+
+        let self_buf = self.page.as_u8_slice_mut();
+        let header_value = self_buf[5] & (0xFF ^ FLAG);
+        let add_this = if value { FLAG } else { 0x00 };
+        self_buf[5] = header_value | add_this;
+    }
+
+    pub fn set_bos(&mut self, value: bool) {
+        const FLAG: u8 = 0x02;
+
+        let self_buf = self.page.as_u8_slice_mut();
+        let header_value = self_buf[5] & (0xFF ^ FLAG);
+        let add_this = if value { FLAG } else { 0x00 };
+        self_buf[5] = header_value | add_this;
+    }
+
+    pub fn set_eos(&mut self, value: bool) {
+        const FLAG: u8 = 0x04;
+
+        let self_buf = self.page.as_u8_slice_mut();
+        let header_value = self_buf[5] & (0xFF ^ FLAG);
+        let add_this = if value { FLAG } else { 0x00 };
+        self_buf[5] = header_value | add_this;
+    }
+
+    pub fn scoped<F>(self, func: F) where F: Fn(ChecksumGuard<'a>) {
+        func(self)
+    }
 }
 
 impl<'a> Drop for ChecksumGuard<'a> {
@@ -525,6 +619,58 @@ impl<'a> Drop for ChecksumGuard<'a> {
     }
 }
 
+pub struct OggBuilder {
+    lengths: Vec<usize>,
+    buffer: Vec<u8>,
+}
+
+impl OggBuilder {
+    pub fn new() -> OggBuilder {
+        OggBuilder {
+            lengths: Vec::new(),
+            buffer: Vec::new(),
+        }
+    }
+
+    pub fn add_packet(&mut self, packet: &[u8]) {
+        println!("adding packet {:?}=>{:?}", packet.len(), packet);
+        self.lengths.push(packet.len());
+        self.buffer.extend(packet);
+    }
+
+    pub fn build(&self) -> Result<OggPageBuf, ()> {
+        let mut segment_count = 0;
+
+        // compute size
+        for &length in self.lengths.iter() {
+            segment_count += length / 255;
+            segment_count += 1;
+        }
+
+        if 255 < segment_count {
+            return Err(());
+        }
+
+        let mut header = OggPageBuf::empty().into_inner();
+        header.pop().unwrap(); // pop the ending zero
+        header.push(segment_count as u8);
+
+        for &length in self.lengths.iter() {
+            let mut length: usize = length;
+            while 255 <= length {
+                length -= 255;
+                header.push(255);
+            }
+            header.push(length as u8);
+        }
+
+        header.extend(&self.buffer[..]);
+        let prelen = header.len();
+        let page = OggPageBuf::new(header).unwrap();
+        assert_eq!(prelen, page.as_u8_slice().len());
+        Ok(page)
+    }
+}
 
 pub struct Recapture([u8; 4]);
 
@@ -549,7 +695,7 @@ impl Recapture {
 
 #[cfg(test)]
 mod tests {
-    use super::{OggTrack, Recapture};
+    use super::{OggTrack, OggPageBuf, Recapture};
 
     static SAMPLE_OGG: &'static [u8] = include_bytes!("../testdata/Hydrate-Kenny_Beltrey.ogg");
 
@@ -596,6 +742,10 @@ mod tests {
         assert!(page1packets.next().unwrap().starts_with(b"\x03vorbis"));
         assert!(page1packets.next().unwrap().starts_with(b"\x05vorbis"));
         assert!(page1packets.next().is_none());
+    }
 
+    #[test]
+    fn test_ogg_page_buf() {
+        let _ = OggPageBuf::empty();
     }
 }

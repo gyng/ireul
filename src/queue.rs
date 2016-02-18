@@ -4,7 +4,7 @@ use std::collections::{VecDeque, HashMap, HashSet};
 use rand::{self, Rng, ChaChaRng};
 
 use ogg::{OggTrack, OggTrackBuf};
-use ogg::vorbis::{Comments, VorbisHeader};
+use ogg::vorbis::{Comments, VorbisPacket};
 use ireul_interface::proxy::track::model::{self, Handle};
 
 
@@ -68,12 +68,12 @@ impl Track {
     pub fn from_ogg_track(handle: Handle, ogg: OggTrackBuf) -> Track {
         use std::ascii::AsciiExt;
 
-        let id_header = match VorbisHeader::find_identification(ogg.pages()) {
+        let id_header = match VorbisPacket::find_identification(ogg.pages()) {
             Ok(header) => header.identification_header(),
             Err(_) => None
         }.expect("Invalid OggTrackBuf");
 
-        let comments = match VorbisHeader::find_comments(ogg.pages()) {
+        let comments = match VorbisPacket::find_comments(ogg.pages()) {
             Ok(header) => header.comments(),
             Err(_) => None
         }.expect("Invalid OggTrackBuf");
@@ -188,7 +188,7 @@ impl PlayQueue {
     pub fn pop_track(&mut self) -> Option<Track> {
         match self.items.pop_front() {
             Some(track) => {
-                self.halloc.dispose(track.handle).unwrap();
+                self.add_history(track.get_track_info());
                 Some(track)
             },
             None => None,
@@ -201,15 +201,17 @@ impl PlayQueue {
             .collect()
     }
 
-    pub fn add_history(&mut self, tinfo: model::TrackInfo) {
-        self.history.push_back(tinfo);
+    fn add_history(&mut self, tinfo: model::TrackInfo) {
+        self.history.push_front(tinfo);
         while 10 < self.history.len() {
-            self.history.pop_front();
+            let track = self.history.pop_back().unwrap();
+            self.halloc.dispose(track.handle).unwrap();
         }
     }
 
     pub fn get_history(&self) -> Vec<model::TrackInfo> {
-        self.history.iter().cloned().collect()
+        self.history.iter().skip(1).cloned().collect()
+
     }
 }
 
