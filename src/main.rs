@@ -34,6 +34,7 @@ use ireul_interface::proxy::track::{
     StatusRequest,
     StatusResult,
 };
+
 use ireul_interface::proxy::{
     RequestType,
     EnqueueTrackRequest,
@@ -52,6 +53,8 @@ use icecastwriter::{
     IceCastWriter,
     IceCastWriterOptions,
 };
+
+const DEAD_AIR: &'static [u8] = include_bytes!("deadair.ogg");
 
 #[derive(RustcDecodable, Debug)]
 struct MetadataConfig {
@@ -111,10 +114,7 @@ fn main() {
     let icecast_options = config.icecast_writer_opts().unwrap();
     let connector = IceCastWriter::with_options(&icecast_url, icecast_options).unwrap();
 
-    let mut file = File::open("howbigisthis.ogg").unwrap();
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).unwrap();
-    let offline_track = OggTrackBuf::new(buffer).unwrap();
+    let offline_track = OggTrack::new(DEAD_AIR).unwrap().to_owned();
 
     let control = TcpListener::bind("0.0.0.0:3001").unwrap();
     let core = Arc::new(Mutex::new(Core {
