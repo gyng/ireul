@@ -17,6 +17,9 @@ pub use self::track::{
     FastForwardRequest,
     FastForwardResult,
     FastForwardError,
+    ReplaceFallbackRequest,
+    ReplaceFallbackResult,
+    ReplaceFallbackError,
 };
 
 // pub const SIZE_LIMIT: bincode::SizeLimit = bincode::SizeLimit::Bounded(20 * 1 << 20);
@@ -24,11 +27,13 @@ pub use self::track::{
 pub const OP_ENQUEUE_TRACK: u32 = 0x1000;
 pub const OP_FAST_FORWARD: u32 = 0x1001;
 pub const OP_QUEUE_STATUS: u32 = 0x1002;
+pub const OP_REPLACE_FALLBACK: u32 = 0x1003;
 
 pub enum RequestType {
     EnqueueTrack,
     FastForward,
     QueueStatus,
+    ReplaceFallback,
 }
 
 impl RequestType {
@@ -37,6 +42,7 @@ impl RequestType {
             OP_ENQUEUE_TRACK => Ok(RequestType::EnqueueTrack),
             OP_FAST_FORWARD => Ok(RequestType::FastForward),
             OP_QUEUE_STATUS => Ok(RequestType::QueueStatus),
+            OP_REPLACE_FALLBACK => Ok(RequestType::ReplaceFallback),
             _ => Err(())
         }
     }
@@ -46,6 +52,7 @@ impl RequestType {
             RequestType::EnqueueTrack => OP_ENQUEUE_TRACK,
             RequestType::FastForward => OP_FAST_FORWARD,
             RequestType::QueueStatus => OP_QUEUE_STATUS,
+            RequestType::ReplaceFallback => OP_REPLACE_FALLBACK,
         }
     }
 }

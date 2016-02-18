@@ -43,6 +43,9 @@ use ireul_interface::proxy::{
     FastForward,
     FastForwardRequest,
     FastForwardResult,
+    ReplaceFallbackRequest,
+    ReplaceFallbackResult,
+    ReplaceFallbackError,
 };
 
 mod queue;
@@ -68,6 +71,7 @@ struct MetadataConfig {
 struct Config {
     icecast_url: String,
     metadata: Option<MetadataConfig>,
+    fallback_track: Option<String>,
 }
 
 impl Config {
@@ -114,7 +118,14 @@ fn main() {
     let icecast_options = config.icecast_writer_opts().unwrap();
     let connector = IceCastWriter::with_options(&icecast_url, icecast_options).unwrap();
 
-    let offline_track = OggTrack::new(DEAD_AIR).unwrap().to_owned();
+    let mut offline_track = OggTrack::new(DEAD_AIR).unwrap().to_owned();
+
+    if let Some(ref filename) = config.fallback_track {
+        let mut file = File::open("howbigisthis.ogg").unwrap();
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).unwrap();
+        offline_track = OggTrackBuf::new(buffer).unwrap();
+    }
 
     let control = TcpListener::bind("0.0.0.0:3001").unwrap();
     let core = Arc::new(Mutex::new(Core {
@@ -264,7 +275,14 @@ fn client_worker(mut stream: TcpStream, core: Arc<Mutex<Core>>) -> io::Result<()
                     exc_core.queue_status(req)
                 };
                 proto::serialize(&resp).unwrap()
-            }
+            },
+            RequestType::ReplaceFallback => {
+                let req = proto::deserialize(&mut cursor).unwrap();
+                let resp = {
+                    let mut exc_core = core.lock().unwrap();
+                    exc_core.replace_fallback(req)
+                };
+                proto::serialize(&resp).unwrap()            }
         };
         try!(stream.write_u32::<BigEndian>(response.len() as u32));
         try!(stream.write_all(&response));
@@ -437,6 +455,45 @@ impl Core {
             upcoming: upcoming,
             history: self.play_queue.get_history(),
         })
+    }
+
+    fn replace_fallback(&mut self, req: ReplaceFallbackRequest) -> ReplaceFallbackResult {
+        let ReplaceFallbackRequest { track, metadata } = req;
+        {
+            let mut pages = 0;
+            let mut samples = 0;
+            for page in track.pages() {
+                pages += 1;
+                samples = page.position();
+            }
+
+            info!("a client sent {} samples in {} pages", samples, pages);
+        }
+
+        if track.as_u8_slice().len() == 0 {
+            return Err(ReplaceFallbackError::InvalidTrack);
+        }
+
+        try!(validate_positions(&track)
+            .map_err(|()| ReplaceFallbackError::InvalidTrack));
+
+        try!(validate_comment_section(&track)
+            .map_err(|()| ReplaceFallbackError::InvalidTrack));
+
+        try!(check_sample_rate(self.clock.sample_rate(), &track)
+            .map_err(|()| ReplaceFallbackError::BadSampleRate));
+
+        let track = rewrite_comments(track.as_ref(), |comments| {
+            comments.vendor = "Ireul Core".to_string();
+            if let Some(ref metadata) = metadata {
+                comments.comments.clear();
+                comments.comments.extend(metadata.iter().cloned());
+            }
+        });
+
+        self.offline_track = queue::Track::from_ogg_track(Handle(0), track);
+
+        Ok(())
     }
 
     // copy a page and tells us up to when we have no work to do
