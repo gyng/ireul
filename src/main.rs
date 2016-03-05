@@ -142,6 +142,7 @@ fn main() {
         play_queue: PlayQueue::new(20),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
+        history: Vec::new(),
     }));
 
     let client_core = core.clone();
@@ -323,14 +324,23 @@ struct Core {
     play_queue: PlayQueue,
     offline_track: queue::Track,
     playing: Option<model::TrackInfo>,
+
+    history: Vec<model::TrackInfo>,
 }
 
 impl Core {
     fn fill_buffer(&mut self) {
+        if let Some(tinfo) = self.playing.take() {
+            self.history.push(tinfo);
+            history_cleanup(&mut self.history);
+        }
+
         let track: queue::Track = match self.play_queue.pop_track() {
             Some(track) => {
                 self.playing_offline = false;
-                self.playing = Some(track.get_track_info());
+                let mut tinfo = track.get_track_info();
+                tinfo.started_at = Some(time::get_time().sec);
+                self.playing = Some(tinfo);
                 track
             },
             None => {
@@ -453,7 +463,7 @@ impl Core {
 
         Ok(model::Queue {
             upcoming: upcoming,
-            history: self.play_queue.get_history(),
+            history: self.history.clone(),
         })
     }
 
@@ -529,6 +539,15 @@ impl Core {
 
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
+}
+
+fn history_cleanup(history: &mut Vec<model::TrackInfo>) {
+    let old_hist = std::mem::replace(history, Vec::new());
+    let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
+    while 20 < old_hist.len() {
+        old_hist.pop_back().unwrap();
+    }
+    history.extend(old_hist.into_iter())
 }
 
 fn rewrite_comments<F>(track: &OggTrack, func: F) -> OggTrackBuf

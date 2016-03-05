@@ -26,6 +26,7 @@ const TRACK_INFO_FIELD_COUNT: u32 = 7;
 #[derive(Clone, Debug)]
 pub struct TrackInfo {
     pub handle: Handle,
+    pub started_at: Option<i64>,
 
     pub artist: String,
     pub album: String,
@@ -44,6 +45,7 @@ impl Deserialize for TrackInfo {
         let field_count = try!(buf.read_u32::<BigEndian>());
 
         let mut handle: Option<Handle> = None;
+        let mut started_at: Option<i64> = None;
         let mut artist: Option<String> = None;
         let mut album: Option<String> = None;
         let mut title: Option<String> = None;
@@ -58,6 +60,9 @@ impl Deserialize for TrackInfo {
                 "handle" => {
                     handle = Some(try!(Deserialize::read(buf)));
                 },
+                "started_at" => {
+                    started_at = Some(try!(Deserialize::read(buf)));
+                }
                 "artist" => {
                     artist = Some(try!(Deserialize::read(buf)));
                 },
@@ -111,6 +116,7 @@ impl Deserialize for TrackInfo {
 
         Ok(TrackInfo {
             handle: handle,
+            started_at: started_at,
             artist: artist,
             album: album,
             title: title,
@@ -124,10 +130,21 @@ impl Deserialize for TrackInfo {
 impl Serialize for TrackInfo {
     fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
         try!(buf.write_u16::<BigEndian>(proto::TYPE_STRUCT));
-        try!(buf.write_u32::<BigEndian>(TRACK_INFO_FIELD_COUNT));
+
+        let mut field_count = TRACK_INFO_FIELD_COUNT;
+        if self.started_at.is_some() {
+            field_count += 1;
+        }
+
+        try!(buf.write_u32::<BigEndian>(field_count));
 
         try!(Serialize::write("handle", buf));
         try!(Serialize::write(&self.handle, buf));
+
+        if let Some(started_at) = self.started_at {
+            try!(Serialize::write("started_at", buf));
+            try!(Serialize::write(&started_at, buf));
+        }
 
         try!(Serialize::write("artist", buf));
         try!(Serialize::write(&*self.artist, buf));

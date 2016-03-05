@@ -53,6 +53,7 @@ impl<R> HandleAllocator<R> where R: Rng {
 #[derive(Clone)]
 pub struct Track {
     handle: Handle,
+
     data: OggTrackBuf,
     comments: Comments,
 
@@ -124,6 +125,7 @@ impl Track {
     pub fn get_track_info(&self) -> model::TrackInfo {
         model::TrackInfo {
             handle: self.handle,
+            started_at: None,
 
             artist: self.artist.clone(),
             album: self.album.clone(),

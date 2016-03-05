@@ -13,7 +13,9 @@ pub const TYPE_STRING: u16 = 0x0084;
 pub const TYPE_RESULT_OK: u16 = 0x0085;
 pub const TYPE_RESULT_ERR: u16 = 0x0086;
 pub const TYPE_TUPLE: u16 = 0x0087;
-
+pub const TYPE_I16: u16 = 0x0088;
+pub const TYPE_I32: u16 = 0x0089;
+pub const TYPE_I64: u16 = 0x008a;
 
 pub trait Deserialize: Sized {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self>;
@@ -85,6 +87,16 @@ impl Serialize for u64 {
         Ok(())
     }
 }
+
+
+impl Serialize for i64 {
+    fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
+        try!(buf.write_u16::<BigEndian>(TYPE_I64));
+        try!(buf.write_i64::<BigEndian>(*self));
+        Ok(())
+    }
+}
+
 
 impl Serialize for str {
     fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
@@ -231,6 +243,17 @@ impl Deserialize for u64 {
     }
 }
 
+impl Deserialize for i64 {
+    fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
+        let type_id = try!(buf.read_u16::<BigEndian>());
+        if type_id != TYPE_I64 {
+            return Err(io::Error::new(io::ErrorKind::Other, "unexpected type"));
+        }
+
+        let value = try!(buf.read_i64::<BigEndian>());
+        Ok(value)
+    }
+}
 
 impl Deserialize for String {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
@@ -318,6 +341,18 @@ pub fn skip_entity(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
         }
         TYPE_U64 => {
             try!(buf.read_u64::<BigEndian>());
+            Ok(())
+        }
+        TYPE_I16 => {
+            try!(buf.read_i16::<BigEndian>());
+            Ok(())
+        }
+        TYPE_I32 => {
+            try!(buf.read_i32::<BigEndian>());
+            Ok(())
+        }
+        TYPE_I64 => {
+            try!(buf.read_i64::<BigEndian>());
             Ok(())
         }
         TYPE_STRING => {
