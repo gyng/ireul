@@ -1,0 +1,16 @@
+[package]
+name = "ireul-client"
+version = "0.1.0"
+authors = ["Stacey Ell <stacey.ell@gmail.com>"]
+
+[dependencies.ogg]
+path = "../ogg"
+
+[dependencies.ogg_clock]
+path = "../ogg_clock"
+
+[dependencies.ireul_interface]
+path = "../ireul_interface"
+
+[dependencies]
+byteorder = "0.4"

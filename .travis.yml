@@ -5,7 +5,8 @@ rust:
 - beta
 - nightly
 script:
-- (cd ogg && cargo test --verbose)
-- (cd ogg_clock && cargo test --verbose)
-- (cd ireul_interface && cargo test --verbose)
+- (cd ogg && cargo build && cargo test --verbose)
+- (cd ogg_clock && cargo build && cargo test --verbose)
+- (cd ireul_interface && cargo build && cargo test --verbose)
+- (cd ireul-client && cargo build && cargo test --verbose)
 - cargo test --verbose

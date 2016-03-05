@@ -3,14 +3,6 @@ name = "ireul"
 version = "0.0.1"
 authors = ["Stacey Ell <stacey.ell@gmail.com>"]
 
-[[bin]]
-name = "ireul-client"
-path = "src/client/main.rs"
-
-[[bin]]
-name = "ireul-core"
-path = "src/core/main.rs"
-
 [dependencies.ogg]
 path = "./ogg"
 

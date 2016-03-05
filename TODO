@@ -6,4 +6,4 @@ todo
 - [ ] Live fallback replacement
 - [ ] DJ support
   - [ ] DJ authentication
-
+- [ ] Reconnection to IceCast

@@ -12,6 +12,7 @@ module Ireul
   TYPE_STRING = 0x0084
   TYPE_RESULT_OK = 0x0085
   TYPE_RESULT_ERR = 0x0086
+  TYPE_TUPLE = 0x0087
 
   TYPESET_NUMBER = [
     TYPE_U16,
@@ -29,6 +30,7 @@ module Ireul
     TYPE_STRING,
     TYPE_RESULT_OK,
     TYPE_RESULT_ERR,
+    TYPE_TUPLE,
   ]
 
   def self._expect_type(reader, expected_types)
@@ -62,6 +64,12 @@ module Ireul
     ].pack('nN'))
     io.write(blob)
     io.string
+  end
+
+  def self._pack_string_pair(writer, type, key, val)
+    writer.write([Ireul::TYPE_TUPLE, 2].pack('nN'))
+    writer.write(Ireul::_pack_string(key))
+    writer.write(Ireul::_pack_string(val))
   end
 
   def self._unpack_instance(reader, allow_types=nil)
@@ -101,6 +109,13 @@ module Ireul
       raise StandardError, "unimplemented"
     when TYPE_RESULT_ERR
       raise StandardError, "unimplemented"
+    when TYPE_TUPLE:
+      length = reader.read(4).unpack('N')[0]
+      out = []
+      length.times {
+        out << Ireul::_unpack_instance(reader, [Ireul::TYPESET_ALL])
+      }
+      out
     end
   end
 end
@@ -532,6 +547,36 @@ module Ireul
     end
   end
 
+  class Metadata
+    def initialize
+      @storage = Array::new()
+    end
+
+    def to_frame(buffer)
+      buffer.write([Ireul::TYPE_ARRAY, @storage.size].pack('nN'))
+      for (key, val) in @storage
+        Ireul::_pack_string_pair(key, val)
+      end
+    end
+
+    def <<(pair)
+      if pair.size != 2
+        raise StandardError, "Bad tuple size: must be 2, not #{pair.size}"
+      end
+      if !pair[0].kind_of?(String)
+        raise StandardError, "Bad tuple value: must be string not #{pair[0].class}"
+      end
+      if !pair[1].kind_of?(String)
+        raise StandardError, "Bad tuple value: must be string not #{pair[1].class}"
+      end
+      @storage << pair
+    end
+
+    def to_a
+      Array::new(@storage)
+    end
+  end
+
   class Core
     ENQUEUE_RESPONSE_TYPE = Result::create_type(Handle, EnqueueTrackError)
     FAST_FORWARD_RESPONSE_TYPE = Result::create_type(Unit, FastForwardError)
@@ -542,11 +587,21 @@ module Ireul
     end
 
     # Accepts an ogg file in the form of a string
-    def enqueue(track) # -> Handle
+    def enqueue(track, metadata=nil) # -> Handle
       io = StringIO::new()
-      io.write([Ireul::TYPE_STRUCT, 1].pack('nN'))
+
+      length = 1
+      if metadata != nil
+        length = 2
+      end
+
+      io.write([Ireul::TYPE_STRUCT, length].pack('nN'))
       io.write(Ireul::_pack_string("track"))
       io.write(Ireul::_pack_blob(track))
+      if metadata != nil
+        io.write(Ireul::_pack_string("metadata"))
+        metadata.to_frame(io)
+      end
 
       send_frame(RequestType::EnqueueTrack, io.string)
       rx_frame = recv_frame()

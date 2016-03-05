@@ -1,3 +1,6 @@
+## this field is optional and will replace the default fallback track:
+# fallback_track = "howbigisthis.ogg"
+
 icecast_url = "http://source:hackme@localhost:8000/mountpoint.ogg"
 
 [metadata]

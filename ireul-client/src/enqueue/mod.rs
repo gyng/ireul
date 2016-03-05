@@ -69,7 +69,10 @@ fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
     }
 
     println!("loaded {} samples in {} pages", samples, pages);
-    let req = EnqueueTrackRequest { track: track };
+    let req = EnqueueTrackRequest {
+        track: track,
+        metadata: None,
+    };
 
     let mut conn = TcpStream::connect("127.0.0.1:3001").unwrap();
     try!(conn.write_u8(0));

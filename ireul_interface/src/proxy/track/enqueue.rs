@@ -8,10 +8,9 @@ use super::super::{RequestType, Request};
 use ::proto::{self, Deserialize, Serialize};
 use super::model::Handle;
 
-const REQUEST_FIELD_COUNT: u32 = 1;
-
 pub struct EnqueueTrackRequest {
     pub track: OggTrackBuf,
+    pub metadata: Option<Vec<(String, String)>>,
 }
 
 impl Deserialize for EnqueueTrackRequest {
@@ -20,12 +19,17 @@ impl Deserialize for EnqueueTrackRequest {
         let field_count = try!(buf.read_u32::<BigEndian>());
 
         let mut track: Option<Vec<u8>> = None;
+        let mut metadata: Option<Vec<(String, String)>> = None;
+
         for _ in 0..field_count {
             let field_name: String = try!(Deserialize::read(buf));
             match &field_name[..] {
                 "track" => {
                     track = Some(try!(Deserialize::read(buf)));
                 },
+                "metadata" => {
+                    metadata = Some(try!(Deserialize::read(buf)));
+                }
                 _ => try!(proto::skip_entity(buf)),
             }
         }
@@ -40,6 +44,7 @@ impl Deserialize for EnqueueTrackRequest {
 
         Ok(EnqueueTrackRequest {
             track: track,
+            metadata: metadata,
         })
     }
 }
@@ -47,10 +52,17 @@ impl Deserialize for EnqueueTrackRequest {
 impl Serialize for EnqueueTrackRequest {
     fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
         try!(buf.write_u16::<BigEndian>(proto::TYPE_STRUCT));
-        try!(buf.write_u32::<BigEndian>(REQUEST_FIELD_COUNT));
+
+        let length = if self.metadata.is_some() { 2 } else { 1 };
+        try!(buf.write_u32::<BigEndian>(length));
 
         try!(Serialize::write("track", buf));
         try!(Serialize::write(self.track.as_u8_slice(), buf));
+
+        if let Some(ref metadata) = self.metadata {
+            try!(Serialize::write("metadata", buf));
+            try!(Serialize::write(&metadata[..], buf));
+        }
 
         Ok(())
     }

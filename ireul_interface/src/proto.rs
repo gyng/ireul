@@ -12,6 +12,8 @@ pub const TYPE_U64: u16 = 0x0083;
 pub const TYPE_STRING: u16 = 0x0084;
 pub const TYPE_RESULT_OK: u16 = 0x0085;
 pub const TYPE_RESULT_ERR: u16 = 0x0086;
+pub const TYPE_TUPLE: u16 = 0x0087;
+
 
 pub trait Deserialize: Sized {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self>;
@@ -76,7 +78,6 @@ impl Serialize for u32 {
     }
 }
 
-
 impl Serialize for u64 {
     fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
         try!(buf.write_u16::<BigEndian>(TYPE_U64));
@@ -84,7 +85,6 @@ impl Serialize for u64 {
         Ok(())
     }
 }
-
 
 impl Serialize for str {
     fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
@@ -96,6 +96,17 @@ impl Serialize for str {
         try!(buf.write_u16::<BigEndian>(TYPE_STRING));
         try!(buf.write_u32::<BigEndian>(length as u32));
         try!(buf.write_all(self.as_bytes()));
+        Ok(())
+    }
+}
+
+// TODO(sell): this shouldn't exist.
+impl Serialize for (String, String) {
+    fn write(&self, buf: &mut io::Cursor<Vec<u8>>) -> io::Result<()> {
+        try!(buf.write_u16::<BigEndian>(TYPE_TUPLE));
+        try!(buf.write_u32::<BigEndian>(2));
+        try!(Serialize::write(&self.0[..], buf));
+        try!(Serialize::write(&self.1[..], buf));
         Ok(())
     }
 }
@@ -116,8 +127,6 @@ impl<V, E> Serialize for Result<V, E> where V: Serialize, E: Serialize {
     }
 }
 
-
-
 impl Deserialize for Vec<u8> {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
         let type_id = try!(buf.read_u16::<BigEndian>());
@@ -134,6 +143,25 @@ impl Deserialize for Vec<u8> {
         }
 
         Ok(out)
+    }
+}
+
+// TODO(sell): this shouldn't exist.
+impl Deserialize for (String, String) {
+    fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
+        let type_id = try!(buf.read_u16::<BigEndian>());
+        if type_id != TYPE_TUPLE {
+            return Err(io::Error::new(io::ErrorKind::Other, "unexpected type"));
+        }
+
+        let length = try!(buf.read_u32::<BigEndian>());
+        if length != 2 {
+            return Err(io::Error::new(io::ErrorKind::Other, "unexpected length"));
+        }
+
+        let left = try!(Deserialize::read(buf));
+        let right = try!(Deserialize::read(buf));
+        Ok((left, right))
     }
 }
 
