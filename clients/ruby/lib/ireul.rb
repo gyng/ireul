@@ -421,7 +421,6 @@ module Ireul
     end
 
     def self.from_hash(hash)
-      puts "track hash = #{hash}"
       track = Track.allocate
       track.instance_eval do
         @handle = hash[:handle],
