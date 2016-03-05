@@ -1,3 +1,5 @@
+extern crate time;
+
 use std::sync::mpsc::{
     self,
     SyncSender,
@@ -5,7 +7,7 @@ use std::sync::mpsc::{
     RecvError
 };
 
-mod track;
+pub mod track;
 
 pub use self::track::{
     EnqueueTrackRequest,
@@ -21,10 +23,12 @@ pub use self::track::{
 
 pub const OP_ENQUEUE_TRACK: u32 = 0x1000;
 pub const OP_FAST_FORWARD: u32 = 0x1001;
+pub const OP_QUEUE_STATUS: u32 = 0x1002;
 
 pub enum RequestType {
     EnqueueTrack,
     FastForward,
+    QueueStatus,
 }
 
 impl RequestType {
@@ -32,6 +36,7 @@ impl RequestType {
         match op_code {
             OP_ENQUEUE_TRACK => Ok(RequestType::EnqueueTrack),
             OP_FAST_FORWARD => Ok(RequestType::FastForward),
+            OP_QUEUE_STATUS => Ok(RequestType::QueueStatus),
             _ => Err(())
         }
     }
@@ -40,6 +45,7 @@ impl RequestType {
         match *self {
             RequestType::EnqueueTrack => OP_ENQUEUE_TRACK,
             RequestType::FastForward => OP_FAST_FORWARD,
+            RequestType::QueueStatus => OP_QUEUE_STATUS,
         }
     }
 }

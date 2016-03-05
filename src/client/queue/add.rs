@@ -4,7 +4,8 @@ use std::ffi::OsString;
 use std::net::TcpStream;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
-use ogg::{OggTrackBuf};
+
+use ogg::OggTrackBuf;
 
 use ireul_interface::proto;
 use ireul_interface::proxy::{
@@ -42,8 +43,9 @@ impl ProgramArgs {
         }
 
         let app_name = args[0].clone();
-        assert_eq!(&args[1], "enqueue");
-        let target_file = args[2].clone();
+        assert_eq!(&args[1], "queue");
+        assert_eq!(&args[2], "add");
+        let target_file = args[3].clone();
 
         Ok(ProgramArgs {
             app_name: app_name,
@@ -97,7 +99,7 @@ fn main(args: Vec<OsString>) -> Result<(), EntryPointError> {
 }
 
 fn print_usage(args: &[OsString]) {
-    println!("{} enqueue <ogg-file>", args[0].clone().into_string().ok().unwrap());
+    println!("{} queue add <ogg-file>", args[0].clone().into_string().ok().unwrap());
     println!("");
     println!("    Validates and enqueues the target file");
     println!("");
