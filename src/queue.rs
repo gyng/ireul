@@ -91,6 +91,7 @@ impl Track {
         let mut title: Option<String> = None;
 
         for &(ref key, ref val) in comments.comments.iter() {
+            let key: &str = key;
             if key.eq_ignore_ascii_case("ARTIST") {
                 artist = Some(val.clone());
             }
