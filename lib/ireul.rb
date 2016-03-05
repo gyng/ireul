@@ -13,11 +13,17 @@ module Ireul
   TYPE_RESULT_OK = 0x0085
   TYPE_RESULT_ERR = 0x0086
   TYPE_TUPLE = 0x0087
+  TYPE_I16 = 0x0088
+  TYPE_I32 = 0x0089
+  TYPE_I64 = 0x008a
 
   TYPESET_NUMBER = [
     TYPE_U16,
     TYPE_U32,
-    TYPE_U64
+    TYPE_U64,
+    TYPE_I16,
+    TYPE_I32,
+    TYPE_I64,
   ].freeze
   TYPESET_ALL = [
     TYPE_ARRAY,
@@ -30,7 +36,10 @@ module Ireul
     TYPE_STRING,
     TYPE_RESULT_OK,
     TYPE_RESULT_ERR,
-    TYPE_TUPLE
+    TYPE_TUPLE,
+    TYPE_I16,
+    TYPE_I32,
+    TYPE_I64,
   ].freeze
 
   def self._expect_type(reader, expected_types)
@@ -100,6 +109,12 @@ module Ireul
       reader.read(4).unpack('N')[0]
     when TYPE_U64
       reader.read(8).unpack('Q>')[0]
+    when TYPE_I16
+      reader.read(2).unpack('s>')[0]
+    when TYPE_I32
+      reader.read(4).unpack('l>')[0]
+    when TYPE_I64
+      reader.read(8).unpack('q>')[0]
     when TYPE_STRING
       length = reader.read(4).unpack('N')[0]
       reader.read(length)
@@ -379,6 +394,9 @@ module Ireul
     # an opaque (to the client) u64 allowing queue set operations
     attr_reader :handle
 
+    # unix_t of when the track started
+    attr_reader :started_at
+
     # track artist
     attr_reader :artist
     # track album
@@ -396,17 +414,20 @@ module Ireul
     # zero if the song is in queue.
     attr_reader :sample_position
 
+
     def self.from_frame(buffer)
       hash = Ireul._unpack_instance(buffer, [Ireul::TYPE_STRUCT])
       Track.from_hash(hash)
     end
 
     def self.from_hash(hash)
+      puts "track hash = #{hash}"
       track = Track.allocate
       track.instance_eval do
         @handle = hash[:handle],
+        @started_at = hash[:started_at],
 
-                  @artist = hash[:artist]
+        @artist = hash[:artist]
         @album = hash[:album]
         @title = hash[:title]
         @extended = hash[:extended]
@@ -425,6 +446,13 @@ module Ireul
     def duration
       # in seconds
       @sample_count.to_f / @sample_rate
+    end
+
+    def start_time
+      if @started_at.nil?
+        return nil
+      end
+      Time.at(@started_at)
     end
   end
 
@@ -503,12 +531,14 @@ module Ireul
       previous_tracks = tracks[0...tracks_before]
       queue_pos = previous_tracks.map(&:position).inject(0, &:+)
       queue_dur = previous_tracks.map(&:duration).inject(0, &:+)
-
       @queue.init_time + queue_dur - queue_pos - position
     end
   end
 
   class QueueStatus
+    # relative to request time
+    attr_reader :start_time
+
     attr_reader :queue
     attr_reader :history
 
@@ -520,9 +550,9 @@ module Ireul
     def self.from_hash(hash)
       status = QueueStatus.allocate
       status.instance_eval do
-        @history = hash[:history].map { |h| Track.from_hash(h) }
+        @history = hash[:history].map(&Track.method(:from_hash))
         @queue = Queue.wrap_tracks(hash[:upcoming]
-          .map { |h| Track.from_hash(h) })
+          .map(&Track.method(:from_hash)))
       end
       status
     end
@@ -669,7 +699,7 @@ module Ireul
       if !queue.history.nil? && !queue.history.empty?
         io.write("=== HISTORY ===\n")
         for item in queue.history
-          io.write("#{queue.current.start_time} :: #{item.artist} - #{item.title}\n")
+          io.write("#{item.start_time} :: #{item.artist} - #{item.title}\n")
         end
       end
       unless queue.current.nil?
