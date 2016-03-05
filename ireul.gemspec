@@ -6,8 +6,7 @@ Gem::Specification.new do |s|
   s.description = "Ruby client for ireul radio backend"
   s.authors     = ["Stacey Ell"]
   s.email       = ''
-  s.require_paths = ["clients/ruby/lib/ireul.rb"]
-  s.files       = ["clients/ruby/lib/ireul.rb"]
+  s.files       = ["lib/ireul.rb"]
   s.homepage    = 'https://github.com/infinityb/ireul'
   s.license     = 'MIT'
 end
