@@ -72,6 +72,7 @@ struct Config {
     icecast_url: String,
     metadata: Option<MetadataConfig>,
     fallback_track: Option<String>,
+    listen_addr: Option<String>,
 }
 
 impl Config {
@@ -127,7 +128,12 @@ fn main() {
         offline_track = OggTrackBuf::new(buffer).unwrap();
     }
 
-    let control = TcpListener::bind("0.0.0.0:3001").unwrap();
+    let control_listen = config.listen_addr
+        .as_ref()
+        .map(String::clone)
+        .unwrap_or_else(|| "[::]:3001".into());
+
+    let control = TcpListener::bind(&control_listen[..]).unwrap();
     let core = Arc::new(Mutex::new(Core {
         connector: connector,
         cur_serial: 0,
