@@ -60,10 +60,10 @@ pub struct IceCastWriter {
 impl IceCastWriter {
     #[allow(dead_code)]
     pub fn new(url: &url::Url) -> io::Result<IceCastWriter> {
-        IceCastWriter::with_options(url, IceCastWriterOptions::default())
+        IceCastWriter::with_options(url, &IceCastWriterOptions::default())
     }
 
-    pub fn with_options(url: &url::Url, opts: IceCastWriterOptions) -> io::Result<IceCastWriter> {
+    pub fn with_options(url: &url::Url, opts: &IceCastWriterOptions) -> io::Result<IceCastWriter> {
         let endpoint = try!(get_endpoint(url).ok_or_else(|| {
             io::Error::new(io::ErrorKind::Other, "Missing hostname in URL")
         }));
@@ -71,7 +71,7 @@ impl IceCastWriter {
         let stream = try!(TcpStream::connect(&endpoint[..]));
         let mut writer = IceCastWriter {
             stream: stream,
-            options: opts
+            options: opts.clone(),
         };
         try!(writer.send_header(url));
         Ok(writer)
