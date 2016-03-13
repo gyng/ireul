@@ -68,7 +68,8 @@ impl IceCastWriter {
             io::Error::new(io::ErrorKind::Other, "Missing hostname in URL")
         }));
 
-        let stream = try!(TcpStream::connect(&endpoint[..]));
+        let mut stream = try!(TcpStream::connect(&endpoint[..]));
+        try!(tcp_stream_setup(&mut stream));
         let mut writer = IceCastWriter {
             stream: stream,
             options: opts.clone(),
@@ -126,6 +127,14 @@ impl IceCastWriter {
     pub fn send_ogg_page(&mut self, page: &OggPage) -> io::Result<()> {
         self.stream.write_all(page.as_u8_slice())
     }
+}
+
+fn tcp_stream_setup(stream: &mut TcpStream) -> io::Result<()> {
+    use std::time::Duration;
+
+    try!(stream.set_read_timeout(Some(Duration::new(10, 0))));
+    try!(stream.set_write_timeout(Some(Duration::new(10, 0))));
+    Ok(())
 }
 
 fn get_endpoint(url: &url::Url) -> Option<String> {
