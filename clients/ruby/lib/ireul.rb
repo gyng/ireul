@@ -421,11 +421,10 @@ module Ireul
     end
 
     def self.from_hash(hash)
-      puts "track hash = #{hash}"
       track = Track.allocate
       track.instance_eval do
-        @handle = hash[:handle],
-        @started_at = hash[:started_at],
+        @handle = hash[:handle]
+        @started_at = hash[:started_at]
 
         @artist = hash[:artist]
         @album = hash[:album]

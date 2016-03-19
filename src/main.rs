@@ -545,7 +545,7 @@ fn history_cleanup(history: &mut Vec<model::TrackInfo>) {
     let old_hist = std::mem::replace(history, Vec::new());
     let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
     while 20 < old_hist.len() {
-        old_hist.pop_back().unwrap();
+        old_hist.pop_front().unwrap();
     }
     history.extend(old_hist.into_iter())
 }
@@ -585,7 +585,6 @@ fn rewrite_comments<F>(track: &OggTrack, func: F) -> OggTrackBuf
                 }
             }
             if !emitted {
-                println!("adding packet: {:?}", packet);
                 builder.add_packet(packet);
             }
         }
