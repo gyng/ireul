@@ -42,10 +42,10 @@ impl<R> HandleAllocator<R> where R: Rng {
         Ok(Handle(new_handle))
     }
 
-    pub fn dispose(&mut self, handle: Handle) -> Result<(), Handle> {
+    pub fn dispose(&mut self, handle: Handle) -> Result<(), ()> {
         match self.allocated.remove(&handle.0) {
             true => Ok(()),
-            false => Err(handle),
+            false => Err(()),
         }
     }
 }
@@ -194,6 +194,10 @@ impl PlayQueue {
         self.items.iter()
             .map(Track::get_track_info)
             .collect()
+    }
+
+    pub fn dispose(&mut self, tinfo: &model::TrackInfo) -> Result<(), ()> {
+        self.halloc.dispose(tinfo.handle)
     }
 }
 
