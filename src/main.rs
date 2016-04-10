@@ -345,7 +345,7 @@ impl Core {
     fn fill_buffer(&mut self) {
         if let Some(tinfo) = self.playing.take() {
             self.history.push(tinfo);
-            history_cleanup(&mut self.history);
+            self.history_cleanup();
         }
 
         let track: queue::Track = match self.play_queue.pop_track() {
@@ -573,16 +573,22 @@ impl Core {
 
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
+
+    fn history_cleanup(&mut self) {
+        let old_hist = std::mem::replace(&mut self.history, Vec::new());
+        let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
+        while 20 < old_hist.len() {
+            let old_item = old_hist.pop_front().unwrap();
+            if let Err(err) = self.play_queue.dispose(&old_item) {
+                error!("error disposing history: {:?}", old_item);
+            }
+            debug!("discard history: {:?}", old_item);
+        }
+        self.history.extend(old_hist.into_iter())
+    }
+
 }
 
-fn history_cleanup(history: &mut Vec<model::TrackInfo>) {
-    let old_hist = std::mem::replace(history, Vec::new());
-    let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
-    while 20 < old_hist.len() {
-        old_hist.pop_front().unwrap();
-    }
-    history.extend(old_hist.into_iter())
-}
 
 fn rewrite_comments<F>(track: &OggTrack, func: F) -> OggTrackBuf
     where F: Fn(&mut VorbisComments) -> ()
