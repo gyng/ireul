@@ -149,7 +149,7 @@ fn main() {
         prev_ogg_serial: 0,
         prev_ogg_sequence: 0,
 
-        play_queue: PlayQueue::new(20),
+        play_queue: PlayQueue::new(40),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
         history: Vec::new(),
