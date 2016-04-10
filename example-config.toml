@@ -1,5 +1,8 @@
-## this field is optional and will replace the default fallback track:
+## optional: Replace the default fallback track with a file
 # fallback_track = "howbigisthis.ogg"
+
+## optional: Override the default listen addr ([::]:3001)
+# listen_addr = "0.0.0.0:3001"
 
 icecast_url = "http://source:hackme@localhost:8000/mountpoint.ogg"
 
