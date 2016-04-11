@@ -42,10 +42,10 @@ impl<R> HandleAllocator<R> where R: Rng {
         Ok(Handle(new_handle))
     }
 
-    pub fn dispose(&mut self, handle: Handle) -> Result<(), Handle> {
+    pub fn dispose(&mut self, handle: Handle) -> Result<(), ()> {
         match self.allocated.remove(&handle.0) {
             true => Ok(()),
-            false => Err(handle),
+            false => Err(()),
         }
     }
 }
@@ -141,7 +141,6 @@ impl Track {
 pub struct PlayQueue {
     halloc: HandleAllocator<ChaChaRng>,
     items: VecDeque<Track>,
-    history: VecDeque<model::TrackInfo>,
 }
 
 impl PlayQueue {
@@ -150,7 +149,6 @@ impl PlayQueue {
         PlayQueue {
             halloc: HandleAllocator::new(rng, limit),
             items: VecDeque::new(),
-            history: VecDeque::new(),
         }
     }
 
@@ -189,13 +187,7 @@ impl PlayQueue {
     }
 
     pub fn pop_track(&mut self) -> Option<Track> {
-        match self.items.pop_front() {
-            Some(track) => {
-                self.add_history(track.get_track_info());
-                Some(track)
-            },
-            None => None,
-        }
+        self.items.pop_front()
     }
 
     pub fn track_infos(&self) -> Vec<model::TrackInfo> {
@@ -204,17 +196,8 @@ impl PlayQueue {
             .collect()
     }
 
-    fn add_history(&mut self, tinfo: model::TrackInfo) {
-        self.history.push_front(tinfo);
-        while 10 < self.history.len() {
-            let track = self.history.pop_back().unwrap();
-            self.halloc.dispose(track.handle).unwrap();
-        }
-    }
-
-    pub fn get_history(&self) -> Vec<model::TrackInfo> {
-        self.history.iter().skip(1).cloned().collect()
-
+    pub fn dispose(&mut self, tinfo: &model::TrackInfo) -> Result<(), ()> {
+        self.halloc.dispose(tinfo.handle)
     }
 }
 

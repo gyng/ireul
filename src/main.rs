@@ -58,6 +58,7 @@ use icecastwriter::{
 };
 
 const DEAD_AIR: &'static [u8] = include_bytes!("deadair.ogg");
+const MAX_RECONNECT_WAIT: u64 = 120;
 
 #[derive(RustcDecodable, Debug)]
 struct MetadataConfig {
@@ -72,6 +73,7 @@ struct Config {
     icecast_url: String,
     metadata: Option<MetadataConfig>,
     fallback_track: Option<String>,
+    listen_addr: Option<String>,
 }
 
 impl Config {
@@ -116,20 +118,28 @@ fn main() {
 
     let icecast_url = config.icecast_url().unwrap();
     let icecast_options = config.icecast_writer_opts().unwrap();
-    let connector = IceCastWriter::with_options(&icecast_url, icecast_options).unwrap();
+    let connector = IceCastWriter::with_options(&icecast_url, &icecast_options).unwrap();
 
     let mut offline_track = OggTrack::new(DEAD_AIR).unwrap().to_owned();
 
     if let Some(ref filename) = config.fallback_track {
-        let mut file = File::open("howbigisthis.ogg").unwrap();
+        let mut file = File::open(filename  ).unwrap();
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer).unwrap();
         offline_track = OggTrackBuf::new(buffer).unwrap();
     }
 
-    let control = TcpListener::bind("0.0.0.0:3001").unwrap();
+    let control_listen = config.listen_addr
+        .as_ref()
+        .map(String::clone)
+        .unwrap_or_else(|| "[::]:3001".into());
+
+    let control = TcpListener::bind(&control_listen[..]).unwrap();
     let core = Arc::new(Mutex::new(Core {
         connector: connector,
+        icecast_url: icecast_url,
+        icecast_options: icecast_options,
+
         cur_serial: 0,
         clock: OggClock::new(48000),
         playing_offline: false,
@@ -311,6 +321,9 @@ fn client_acceptor(server: TcpListener, core: Arc<Mutex<Core>>) {
 /// Connects to IceCast and holds references to streamable content.
 struct Core {
     connector: IceCastWriter,
+    icecast_url: url::Url,
+    icecast_options: IceCastWriterOptions,
+
     cur_serial: u32,
     clock: OggClock,
 
@@ -332,7 +345,7 @@ impl Core {
     fn fill_buffer(&mut self) {
         if let Some(tinfo) = self.playing.take() {
             self.history.push(tinfo);
-            history_cleanup(&mut self.history);
+            self.history_cleanup();
         }
 
         let track: queue::Track = match self.play_queue.pop_track() {
@@ -506,6 +519,12 @@ impl Core {
         Ok(())
     }
 
+    fn reconnect_icecast(&mut self) -> io::Result<()> {
+        self.connector = try!(IceCastWriter::with_options(
+            &self.icecast_url, &self.icecast_options));
+        Ok(())
+    }
+
     // copy a page and tells us up to when we have no work to do
     fn tick(&mut self) -> SteadyTime {
         let page = self.get_next_page();
@@ -515,7 +534,22 @@ impl Core {
         self.prev_ogg_sequence = page.sequence();
 
         if let Err(err) = self.connector.send_ogg_page(&page) {
-            //
+            self.fast_forward_track_boundary();
+
+            let mut wait = 5;
+            let mut attempt: u64 = 1;
+            loop {
+                if MAX_RECONNECT_WAIT < wait {
+                    wait = MAX_RECONNECT_WAIT;
+                }
+                if let Err(err) = self.reconnect_icecast() {
+                    error!("error reconnecting [attempt={}]: {}", attempt, err);
+                    wait += wait;
+                    attempt += 1;
+                    ::std::thread::sleep_ms((1000 * wait) as u32);
+                }
+            }
+            return SteadyTime::now();
         }
 
         if let Some(playing) = self.playing.as_mut() {
@@ -539,16 +573,22 @@ impl Core {
 
         SteadyTime::now() + self.clock.wait_duration(&page)
     }
+
+    fn history_cleanup(&mut self) {
+        let old_hist = std::mem::replace(&mut self.history, Vec::new());
+        let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
+        while 20 < old_hist.len() {
+            let old_item = old_hist.pop_front().unwrap();
+            if let Err(err) = self.play_queue.dispose(&old_item) {
+                error!("error disposing history: {:?}", old_item);
+            }
+            debug!("discard history: {:?}", old_item);
+        }
+        self.history.extend(old_hist.into_iter())
+    }
+
 }
 
-fn history_cleanup(history: &mut Vec<model::TrackInfo>) {
-    let old_hist = std::mem::replace(history, Vec::new());
-    let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
-    while 20 < old_hist.len() {
-        old_hist.pop_front().unwrap();
-    }
-    history.extend(old_hist.into_iter())
-}
 
 fn rewrite_comments<F>(track: &OggTrack, func: F) -> OggTrackBuf
     where F: Fn(&mut VorbisComments) -> ()
