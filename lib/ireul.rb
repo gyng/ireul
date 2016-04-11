@@ -59,7 +59,7 @@ module Ireul
     io = StringIO.new
     io.write([
       Ireul::TYPE_BLOB,
-      blob.size
+      blob.bytesize
     ].pack('nN'))
     io.write(blob)
     io.string
@@ -69,13 +69,13 @@ module Ireul
     io = StringIO.new
     io.write([
       Ireul::TYPE_STRING,
-      blob.size
+      blob.bytesize
     ].pack('nN'))
     io.write(blob)
     io.string
   end
 
-  def self._pack_string_pair(writer, _type, key, val)
+  def self._pack_string_pair(writer, key, val)
     writer.write([Ireul::TYPE_TUPLE, 2].pack('nN'))
     writer.write(Ireul._pack_string(key))
     writer.write(Ireul._pack_string(val))
@@ -572,8 +572,8 @@ module Ireul
 
     def to_frame(buffer)
       buffer.write([Ireul::TYPE_ARRAY, @storage.size].pack('nN'))
-      for (key, val) in @storage
-        Ireul._pack_string_pair(key, val)
+      for (key, val) in @storage.each
+        Ireul._pack_string_pair(buffer, key, val)
       end
     end
 
