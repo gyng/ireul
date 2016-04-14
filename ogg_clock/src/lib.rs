@@ -1,6 +1,9 @@
 extern crate time;
 extern crate ogg;
 
+use std::thread;
+use std::time::Duration as StdDuration;
+
 use ogg::OggPage;
 use time::{Duration, SteadyTime};
 
@@ -83,7 +86,7 @@ impl OggClock {
         let sleep_dur = self.clock.wait_delay(SteadyTime::now(), abs_pos);
 
         if Duration::zero() < sleep_dur {
-            ::std::thread::sleep_ms(sleep_dur.num_milliseconds() as u32);
+            thread::sleep(StdDuration::from_millis(sleep_dur.num_milliseconds() as u64));
         }
 
         Ok(())
