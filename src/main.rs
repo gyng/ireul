@@ -554,6 +554,8 @@ impl Core {
                     wait += wait;
                     attempt += 1;
                     thread::sleep(Duration::from_millis(wait * 1000));
+                } else {
+                    break;
                 }
             }
             return SteadyTime::now();
