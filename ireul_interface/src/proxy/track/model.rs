@@ -21,7 +21,7 @@ impl Serialize for Handle {
     }
 }
 
-const TRACK_INFO_FIELD_COUNT: u32 = 7;
+const TRACK_INFO_FIELD_COUNT: u32 = 8;
 
 #[derive(Clone, Debug)]
 pub struct TrackInfo {
@@ -36,7 +36,7 @@ pub struct TrackInfo {
     pub sample_count: u64,
     pub sample_position: u64,
 
-    // pub metadata: Vec<(String, String)>,
+    pub metadata: Vec<(String, String)>,
 }
 
 impl Deserialize for TrackInfo {
@@ -52,7 +52,7 @@ impl Deserialize for TrackInfo {
         let mut sample_rate: Option<u64> = None;
         let mut sample_count: Option<u64> = None;
         let mut sample_position: Option<u64> = None;
-        // let mut metadata: Option<Vec<(String, String)>> = None;
+        let mut metadata: Option<Vec<(String, String)>> = None;
 
         for _ in 0..field_count {
             let field_name: String = try!(Deserialize::read(buf));
@@ -80,6 +80,9 @@ impl Deserialize for TrackInfo {
                 },
                 "sample_position" => {
                     sample_position = Some(try!(Deserialize::read(buf)));
+                },
+                "metadata" => {
+                    metadata = Some(try!(Deserialize::read(buf)));
                 },
                 _ => try!(proto::skip_entity(buf)),
             }
@@ -113,6 +116,10 @@ impl Deserialize for TrackInfo {
             Some(sample_position) => sample_position,
             None => return Err(io::Error::new(io::ErrorKind::Other, "missing field: sample_position")),
         };
+        let metadata = match metadata {
+            Some(metadata) => metadata,
+            None => return Err(io::Error::new(io::ErrorKind::Other, "missing field: metadata")),
+        };
 
         Ok(TrackInfo {
             handle: handle,
@@ -123,6 +130,7 @@ impl Deserialize for TrackInfo {
             sample_rate: sample_rate,
             sample_count: sample_count,
             sample_position: sample_position,
+            metadata: metadata,
         })
     }
 }
@@ -163,6 +171,9 @@ impl Serialize for TrackInfo {
 
         try!(Serialize::write("sample_position", buf));
         try!(Serialize::write(&self.sample_position, buf));
+
+        try!(Serialize::write("metadata", buf));
+        try!(Serialize::write(&self.metadata[..], buf));
 
         Ok(())
     }

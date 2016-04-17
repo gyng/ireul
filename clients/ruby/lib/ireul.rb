@@ -46,7 +46,7 @@ module Ireul
     type_short = reader.read(2).unpack('n')[0]
     unless expected_types.include?(type_short)
       allowed = expected_types.join(', ')
-      raise KeyError, "Unexpected type: got #{type_short} expected #{allowed}"
+      raise KeyError, "Unexpected type: got #{type_short} expected #{allowed} #{expected_types.inspect}"
     end
     type_short
   end
@@ -126,7 +126,7 @@ module Ireul
       length = reader.read(4).unpack('N')[0]
       out = []
       length.times do
-        out << Ireul._unpack_instance(reader, [Ireul::TYPESET_ALL])
+        out << Ireul._unpack_instance(reader, Ireul::TYPESET_ALL)
       end
       out
     end
@@ -413,6 +413,7 @@ module Ireul
     # the number of samples that have been played. This is always
     # zero if the song is in queue.
     attr_reader :sample_position
+    attr_reader :metadata
 
 
     def self.from_frame(buffer)
@@ -434,6 +435,7 @@ module Ireul
         @sample_rate = hash[:sample_rate]
         @sample_count = hash[:sample_count]
         @sample_position = hash[:sample_position]
+        @metadata = hash[:metadata]
       end
       track
     end
@@ -497,7 +499,7 @@ module Ireul
     def_delegators :@track,
                    :artist, :album, :title, :extended,
                    :sample_rate, :sample_count, :sample_position,
-                   :position, :duration
+                   :position, :duration, :metadata
 
     attr_reader :start_time
 
@@ -708,7 +710,7 @@ module Ireul
       if !queue.upcoming.nil? && !queue.upcoming.empty?
         io.write("=== UPCOMING ===\n")
         for item in queue.upcoming
-          io.write("#{item.start_time} :: #{item.artist} - #{item.title}\n")
+          io.write("#{item.start_time} :: #{item.artist} - #{item.title} :: #{item.metadata.inspect}\n")
         end
       end
       io.string

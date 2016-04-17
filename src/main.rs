@@ -20,11 +20,12 @@ use std::net::{TcpStream, TcpListener};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::fs::File;
+use std::time::Duration;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian, ByteOrder};
 use time::SteadyTime;
 
-use ogg::{OggTrack, OggTrackBuf, OggPage, OggPageBuf, OggBuilder};
+use ogg::{OggTrack, OggTrackBuf, OggPageBuf, OggBuilder};
 use ogg::vorbis::{VorbisPacket, VorbisPacketBuf, Comments as VorbisComments};
 use ogg_clock::OggClock;
 
@@ -58,7 +59,9 @@ use icecastwriter::{
 };
 
 const DEAD_AIR: &'static [u8] = include_bytes!("deadair.ogg");
+
 const MAX_RECONNECT_WAIT: u64 = 120;
+
 
 #[derive(RustcDecodable, Debug)]
 struct MetadataConfig {
@@ -149,7 +152,7 @@ fn main() {
         prev_ogg_serial: 0,
         prev_ogg_sequence: 0,
 
-        play_queue: PlayQueue::new(20),
+        play_queue: PlayQueue::new(40),
         offline_track: queue::Track::from_ogg_track(Handle(0), offline_track),
         playing: None,
         history: Vec::new(),
@@ -167,7 +170,8 @@ fn main() {
         };
 
         let sleep_time = next_tick_deadline - SteadyTime::now();
-        ::std::thread::sleep_ms(sleep_time.num_milliseconds() as u32);
+        thread::sleep(Duration::from_millis(sleep_time.num_milliseconds() as u64));
+
     }
 }
 
@@ -221,7 +225,6 @@ fn update_serial(serial: u32, track: &mut OggTrack) {
 }
 
 fn client_worker(mut stream: TcpStream, core: Arc<Mutex<Core>>) -> io::Result<()> {
-    const BUFFER_SIZE_LIMIT: usize = 20 * 1 << 20;
     loop {
         let version = try!(stream.read_u8());
 
@@ -242,9 +245,9 @@ fn client_worker(mut stream: TcpStream, core: Arc<Mutex<Core>>) -> io::Result<()
         }));
 
         let frame_length = try!(stream.read_u32::<BigEndian>()) as usize;
-        if BUFFER_SIZE_LIMIT < frame_length {
+        if proto::MESSAGE_SIZE_LIMIT < frame_length {
             let err_msg = format!("datagram too large: {} bytes (limit is {})",
-                frame_length, BUFFER_SIZE_LIMIT);
+                frame_length, proto::MESSAGE_SIZE_LIMIT);
             return Err(io::Error::new(io::ErrorKind::Other, err_msg));
         }
 
@@ -378,7 +381,7 @@ impl Core {
     }
 
     fn fast_forward_track_boundary(&mut self) -> FastForwardResult {
-        let mut old_buffer = mem::replace(&mut self.buffer, VecDeque::new());
+        let old_buffer = mem::replace(&mut self.buffer, VecDeque::new());
 
         let mut page_iter = old_buffer.into_iter();
 
@@ -534,7 +537,11 @@ impl Core {
         self.prev_ogg_sequence = page.sequence();
 
         if let Err(err) = self.connector.send_ogg_page(&page) {
-            self.fast_forward_track_boundary();
+            error!("Disconnected from icecast server: {:?}", err);
+
+            if let Err(err) = self.fast_forward_track_boundary() {
+                error!("Error fast forwarding: {:?}", err);
+            }
 
             let mut wait = 5;
             let mut attempt: u64 = 1;
@@ -546,7 +553,9 @@ impl Core {
                     error!("error reconnecting [attempt={}]: {}", attempt, err);
                     wait += wait;
                     attempt += 1;
-                    ::std::thread::sleep_ms((1000 * wait) as u32);
+                    thread::sleep(Duration::from_millis(wait * 1000));
+                } else {
+                    break;
                 }
             }
             return SteadyTime::now();
@@ -579,7 +588,7 @@ impl Core {
         let mut old_hist: VecDeque<_> = old_hist.into_iter().collect();
         while 20 < old_hist.len() {
             let old_item = old_hist.pop_front().unwrap();
-            if let Err(err) = self.play_queue.dispose(&old_item) {
+            if let Err(()) = self.play_queue.dispose(&old_item) {
                 error!("error disposing history: {:?}", old_item);
             }
             debug!("discard history: {:?}", old_item);
