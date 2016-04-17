@@ -1,6 +1,9 @@
 use std::io::{self, Read, Write};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
+/// Maximum size of a message
+pub const MESSAGE_SIZE_LIMIT: usize = 100 * 1 << 20;
+
 pub const TYPE_ARRAY: u16 = 0x0000;
 pub const TYPE_BLOB: u16 = 0x0002;
 pub const TYPE_STRUCT: u16 = 0x0005;

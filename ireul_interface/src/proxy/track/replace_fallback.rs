@@ -5,7 +5,6 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use ogg::{OggTrackBuf};
 
 use super::super::{RequestType, Request};
-use super::model::{Queue};
 
 use ::proto::{self, Deserialize, Serialize};
 

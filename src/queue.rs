@@ -134,6 +134,7 @@ impl Track {
             sample_rate: self.sample_rate,
             sample_count: self.sample_count,
             sample_position: 0,
+            metadata: self.comments.comments.clone(),
         }
     }
 }
