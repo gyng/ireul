@@ -46,7 +46,7 @@ module Ireul
     type_short = reader.read(2).unpack('n')[0]
     unless expected_types.include?(type_short)
       allowed = expected_types.join(', ')
-      raise KeyError, "Unexpected type: got #{type_short} expected #{allowed}"
+      raise KeyError, "Unexpected type: got #{type_short} expected #{allowed} #{expected_types.inspect}"
     end
     type_short
   end
@@ -59,7 +59,7 @@ module Ireul
     io = StringIO.new
     io.write([
       Ireul::TYPE_BLOB,
-      blob.size
+      blob.bytesize
     ].pack('nN'))
     io.write(blob)
     io.string
@@ -69,13 +69,13 @@ module Ireul
     io = StringIO.new
     io.write([
       Ireul::TYPE_STRING,
-      blob.size
+      blob.bytesize
     ].pack('nN'))
     io.write(blob)
     io.string
   end
 
-  def self._pack_string_pair(writer, _type, key, val)
+  def self._pack_string_pair(writer, key, val)
     writer.write([Ireul::TYPE_TUPLE, 2].pack('nN'))
     writer.write(Ireul._pack_string(key))
     writer.write(Ireul._pack_string(val))
@@ -126,7 +126,7 @@ module Ireul
       length = reader.read(4).unpack('N')[0]
       out = []
       length.times do
-        out << Ireul._unpack_instance(reader, [Ireul::TYPESET_ALL])
+        out << Ireul._unpack_instance(reader, Ireul::TYPESET_ALL)
       end
       out
     end
@@ -413,6 +413,7 @@ module Ireul
     # the number of samples that have been played. This is always
     # zero if the song is in queue.
     attr_reader :sample_position
+    attr_reader :metadata
 
 
     def self.from_frame(buffer)
@@ -421,11 +422,10 @@ module Ireul
     end
 
     def self.from_hash(hash)
-      puts "track hash = #{hash}"
       track = Track.allocate
       track.instance_eval do
-        @handle = hash[:handle],
-        @started_at = hash[:started_at],
+        @handle = hash[:handle]
+        @started_at = hash[:started_at]
 
         @artist = hash[:artist]
         @album = hash[:album]
@@ -435,6 +435,7 @@ module Ireul
         @sample_rate = hash[:sample_rate]
         @sample_count = hash[:sample_count]
         @sample_position = hash[:sample_position]
+        @metadata = hash[:metadata]
       end
       track
     end
@@ -498,7 +499,7 @@ module Ireul
     def_delegators :@track,
                    :artist, :album, :title, :extended,
                    :sample_rate, :sample_count, :sample_position,
-                   :position, :duration
+                   :position, :duration, :metadata
 
     attr_reader :start_time
 
@@ -573,8 +574,8 @@ module Ireul
 
     def to_frame(buffer)
       buffer.write([Ireul::TYPE_ARRAY, @storage.size].pack('nN'))
-      for (key, val) in @storage
-        Ireul._pack_string_pair(key, val)
+      for (key, val) in @storage.each
+        Ireul._pack_string_pair(buffer, key, val)
       end
     end
 
@@ -709,7 +710,7 @@ module Ireul
       if !queue.upcoming.nil? && !queue.upcoming.empty?
         io.write("=== UPCOMING ===\n")
         for item in queue.upcoming
-          io.write("#{item.start_time} :: #{item.artist} - #{item.title}\n")
+          io.write("#{item.start_time} :: #{item.artist} - #{item.title} :: #{item.metadata.inspect}\n")
         end
       end
       io.string

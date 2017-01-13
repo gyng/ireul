@@ -1,6 +1,9 @@
 use std::io::{self, Read, Write};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
+/// Maximum size of a message
+pub const MESSAGE_SIZE_LIMIT: usize = 100 * 1 << 20;
+
 pub const TYPE_ARRAY: u16 = 0x0000;
 pub const TYPE_BLOB: u16 = 0x0002;
 pub const TYPE_STRUCT: u16 = 0x0005;
@@ -163,7 +166,8 @@ impl Deserialize for (String, String) {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
         let type_id = try!(buf.read_u16::<BigEndian>());
         if type_id != TYPE_TUPLE {
-            return Err(io::Error::new(io::ErrorKind::Other, "unexpected type"));
+            return Err(io::Error::new(io::ErrorKind::Other,
+                format!("unexpected type: {} != {}", TYPE_TUPLE, type_id)));
         }
 
         let length = try!(buf.read_u32::<BigEndian>());
@@ -259,7 +263,8 @@ impl Deserialize for String {
     fn read(buf: &mut io::Cursor<Vec<u8>>) -> io::Result<Self> {
         let type_id = try!(buf.read_u16::<BigEndian>());
         if type_id != TYPE_STRING {
-            return Err(io::Error::new(io::ErrorKind::Other, "unexpected type"));
+            return Err(io::Error::new(io::ErrorKind::Other,
+                format!("unexpected type: {} != {}", TYPE_STRING, type_id)));
         }
 
         let length = try!(buf.read_u32::<BigEndian>());
@@ -270,8 +275,10 @@ impl Deserialize for String {
             try!(limit_reader.read_to_end(&mut out));
         }
 
-        String::from_utf8(out)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid string"))
+        String::from_utf8(out).map_err(|inv| {
+            io::Error::new(io::ErrorKind::Other,
+                format!("invalid string: {:?}", inv))
+        })
     }
 }
 

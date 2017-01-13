@@ -2,7 +2,6 @@ extern crate time;
 
 use std::sync::mpsc::{
     self,
-    SyncSender,
     TrySendError,
     RecvError
 };
